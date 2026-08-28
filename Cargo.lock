@@ -4268,6 +4268,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "esi-workspace"
+version = "1.48.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "etcetera"
 version = "0.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
