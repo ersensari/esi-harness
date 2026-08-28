@@ -64,6 +64,32 @@ fn create_resume_and_inspect_preserve_dirty_main_worktree() {
 }
 
 #[test]
+fn inspection_snapshot_tracks_uncommitted_file_contents() {
+    let fixture = Fixture::new();
+    let session_id = SessionId::new("snapshot").unwrap();
+    let created = fixture
+        .manager
+        .create(&fixture.repository, session_id.clone(), "HEAD")
+        .unwrap();
+    let worktree = &created.record.identity.worktree_path;
+    std::fs::write(worktree.join("draft.txt"), "first\n").unwrap();
+    let first = fixture
+        .manager
+        .inspect(&fixture.repository, &session_id)
+        .unwrap();
+    std::fs::write(worktree.join("draft.txt"), "second\n").unwrap();
+    let second = fixture
+        .manager
+        .inspect(&fixture.repository, &session_id)
+        .unwrap();
+
+    assert!(first.dirty);
+    assert_eq!(first.changed_files, vec!["draft.txt"]);
+    assert_ne!(first.snapshot_id, created.snapshot_id);
+    assert_ne!(second.snapshot_id, first.snapshot_id);
+}
+
+#[test]
 fn cleanup_requires_exact_approval_and_refuses_dirty_worktrees() {
     let fixture = Fixture::new();
     let session_id = SessionId::new("cleanup").unwrap();

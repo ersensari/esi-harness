@@ -1548,16 +1548,40 @@ mod tests {
     #[test]
     fn list_sources_lists_builtin_skills() {
         let listed = list_sources(Some(SourceType::BuiltinSkill), None, false).unwrap();
-        let builtin = listed
+        let documentation = listed
             .iter()
             .find(|source| source.name == "goose-doc-guide")
             .expect("expected goose-doc-guide builtin skill");
 
-        assert_eq!(builtin.source_type, SourceType::BuiltinSkill);
-        assert!(builtin.global);
-        assert_eq!(builtin.path, "builtin://skills/goose-doc-guide");
-        assert!(builtin.supporting_files.is_empty());
-        assert!(!builtin.content.is_empty());
+        assert_eq!(documentation.source_type, SourceType::BuiltinSkill);
+        assert!(documentation.global);
+        assert_eq!(documentation.path, "builtin://skills/goose-doc-guide");
+        assert!(documentation.supporting_files.is_empty());
+        assert!(!documentation.content.is_empty());
+
+        let development = listed
+            .iter()
+            .find(|source| source.name == "esi-local-development")
+            .expect("expected ESI local development builtin skill");
+        assert_eq!(development.source_type, SourceType::BuiltinSkill);
+        assert!(development.global);
+        assert_eq!(development.path, "builtin://skills/esi-local-development");
+        assert!(development.content.contains("normal Goose tools"));
+        assert!(development.content.contains("only authority"));
+        assert!(development.content.contains("Never call ForgeLoop"));
+        for forbidden in [
+            "http://",
+            "https://",
+            "LITELLM_",
+            "FORGELOOP_SERVER",
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+        ] {
+            assert!(
+                !development.content.contains(forbidden),
+                "ESI development skill contains private or provider-specific material: {forbidden}"
+            );
+        }
     }
 
     #[test]

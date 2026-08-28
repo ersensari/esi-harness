@@ -1,8 +1,9 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 use thiserror::Error;
 
@@ -88,6 +89,7 @@ pub struct WorktreeInspection {
     pub head: String,
     pub dirty: bool,
     pub changed_files: Vec<String>,
+    pub snapshot_id: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -455,11 +457,11 @@ impl WorkspaceManager {
             return Err(WorkspaceError::OwnershipMismatch);
         }
         let head = git_stdout(&record.identity.worktree_path, ["rev-parse", "HEAD"])?;
-        let status = git_stdout(
+        let status = git(
             &record.identity.worktree_path,
-            ["status", "--porcelain=v1", "--untracked-files=all"],
+            ["status", "--porcelain=v1", "-z", "--untracked-files=all"],
         )?;
-        let changed_files = git_stdout(
+        let mut changed_files = git_stdout(
             &record.identity.worktree_path,
             [
                 "diff",
@@ -470,12 +472,23 @@ impl WorkspaceManager {
         .lines()
         .filter(|line| !line.is_empty())
         .map(str::to_owned)
-        .collect();
+        .collect::<BTreeSet<_>>();
+        changed_files.extend(git_lines(
+            &record.identity.worktree_path,
+            ["diff", "--name-only", "HEAD"],
+        )?);
+        changed_files.extend(git_lines(
+            &record.identity.worktree_path,
+            ["ls-files", "--others", "--exclude-standard"],
+        )?);
+        let snapshot_id =
+            worktree_snapshot_id(&record.identity.worktree_path, &head, &status.stdout)?;
         Ok(WorktreeInspection {
             record,
             head,
-            dirty: !status.is_empty(),
-            changed_files,
+            dirty: !status.stdout.is_empty(),
+            changed_files: changed_files.into_iter().collect(),
+            snapshot_id,
         })
     }
 
@@ -513,6 +526,61 @@ impl WorkspaceManager {
         fs::rename(temporary, path)?;
         Ok(())
     }
+}
+
+fn git_lines<I, S>(cwd: &Path, arguments: I) -> Result<Vec<String>>
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<OsStr>,
+{
+    Ok(git_stdout(cwd, arguments)?
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_owned)
+        .collect())
+}
+
+fn worktree_snapshot_id(worktree: &Path, head: &str, status: &[u8]) -> Result<String> {
+    let diff = git(worktree, ["diff", "--binary", "--no-ext-diff", "HEAD"])?;
+    let untracked = git(
+        worktree,
+        ["ls-files", "--others", "--exclude-standard", "-z"],
+    )?;
+    let mut hasher = Sha256::new();
+    hasher.update(head.as_bytes());
+    hasher.update([0]);
+    hasher.update(status);
+    hasher.update(&diff.stdout);
+    for encoded_path in untracked.stdout.split(|byte| *byte == 0) {
+        if encoded_path.is_empty() {
+            continue;
+        }
+        let path = Path::new(
+            std::str::from_utf8(encoded_path).map_err(|_| WorkspaceError::OwnershipMismatch)?,
+        );
+        if path.is_absolute()
+            || path
+                .components()
+                .any(|component| matches!(component, Component::ParentDir | Component::RootDir))
+        {
+            return Err(WorkspaceError::OwnershipMismatch);
+        }
+        let absolute_path = worktree.join(path);
+        hasher.update(encoded_path);
+        hasher.update([0]);
+        let metadata = fs::symlink_metadata(&absolute_path)?;
+        if metadata.file_type().is_symlink() {
+            hasher.update(fs::read_link(absolute_path)?.as_os_str().as_encoded_bytes());
+        } else {
+            hasher.update(fs::read(absolute_path)?);
+        }
+        hasher.update([0]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect())
 }
 
 #[derive(Debug)]

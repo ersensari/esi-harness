@@ -58,6 +58,29 @@ assert.match(initConfig, /^ESI_PROVIDER_PROFILE: team\s*$/m);
 assert.match(initConfig, /^GOOSE_PROVIDER: chatgpt_codex\s*$/m);
 assert.match(initConfig, /^GOOSE_MODEL: gpt-5\.5\s*$/m);
 
+const developmentSkill = readFileSync(
+  resolve(repoRoot, 'crates', 'goose', 'src', 'skills', 'builtins', 'esi_local_development.md'),
+  'utf8'
+);
+for (const expected of [
+  'name: esi-local-development',
+  'normal Goose tools',
+  'only authority',
+  'Never call ForgeLoop',
+  'provider-neutral',
+]) {
+  assert.ok(developmentSkill.includes(expected), `missing development skill contract: ${expected}`);
+}
+for (const forbidden of [
+  /https?:\/\//,
+  /LITELLM_/,
+  /FORGELOOP_SERVER/,
+  /OPENAI_API_KEY/,
+  /ANTHROPIC_API_KEY/,
+]) {
+  assert.ok(!forbidden.test(developmentSkill), `development skill leaks private material: ${forbidden}`);
+}
+
 const providerManifest = JSON.parse(
   readFileSync(resolve(repoRoot, 'provider-profiles', 'manifest.json'), 'utf8')
 );
