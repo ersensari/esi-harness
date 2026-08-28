@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {
+      "id": "team",
+      "default_provider": "chatgpt_codex",
+      "providers": [
+        {
+          "id": "chatgpt_codex",
+          "role": "primary",
+          "authentication": "browser_oauth",
+          "credential_owner": "provider_client"
+        },
+        {
+          "id": "claude-acp",
+          "role": "alternative",
+          "authentication": "official_client",
+          "credential_owner": "official_claude_client"
+        }
+      ],
+      "allow_other_goose_providers": false,
+      "allow_private_litellm": false,
+      "allow_private_forgeloop": false
+    },
+    {
+      "id": "operator",
+      "default_provider": "chatgpt_codex",
+      "providers": [
+        {
+          "id": "chatgpt_codex",
+          "role": "primary",
+          "authentication": "browser_oauth",
+          "credential_owner": "provider_client"
+        },
+        {
+          "id": "claude-acp",
+          "role": "alternative",
+          "authentication": "official_client",
+          "credential_owner": "official_claude_client"
+        },
+        {
+          "id": "codex-acp",
+          "role": "optional",
+          "authentication": "official_client",
+          "credential_owner": "official_codex_client"
+        },
+        {
+          "id": "openai",
+          "role": "optional",
+          "authentication": "operator_configured",
+          "credential_owner": "operator"
+        },
+        {
+          "id": "anthropic",
+          "role": "optional",
+          "authentication": "operator_configured",
+          "credential_owner": "operator"
+        },
+        {
+          "id": "litellm",
+          "role": "optional",
+          "authentication": "operator_configured",
+          "credential_owner": "operator"
+        },
+        {
+          "id": "ollama",
+          "role": "optional",
+          "authentication": "local_runtime",
+          "credential_owner": "operator"
+        },
+        {
+          "id": "lmstudio",
+          "role": "optional",
+          "authentication": "local_runtime",
+          "credential_owner": "operator"
+        }
+      ],
+      "allow_other_goose_providers": true,
+      "allow_private_litellm": true,
+      "allow_private_forgeloop": true
+    }
+  ]
+}

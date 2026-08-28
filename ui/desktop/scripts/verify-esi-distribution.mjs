@@ -20,12 +20,17 @@ for (const id of ['esi-wiki', 'esi-innovation', 'forgeloop']) {
   assert.equal(extension.enabled, false, `${id} must be disabled by default`);
   assert.equal(extension.bundled, true, `${id} must be managed by the distribution`);
 }
+const forgeLoop = extensions.find((candidate) => candidate.id === 'forgeloop');
+assert.equal(forgeLoop.display_name, 'ForgeLoop (Operator Only)');
+assert.match(forgeLoop.description, /operator-only/i);
 
 const forgeConfig = read('forge.config.ts');
 for (const expected of [
   "name: 'ESI-Studio'",
   "executableName: 'esi-studio'",
   "appBundleId: 'ai.esi.studio'",
+  "{ from: '../../init-config.yaml', to: 'init-config.yaml' }",
+  "{ from: '../../provider-profiles', to: 'provider-profiles' }",
   "owner: process.env.GITHUB_OWNER || 'ersensari'",
   "name: process.env.GITHUB_REPO || 'esi-harness'",
 ]) {
@@ -49,8 +54,65 @@ for (const icon of ['esi-icon.svg', 'esi-icon.png', 'esi-icon-512.png', 'esi-ico
 
 const initConfig = readFileSync(resolve(repoRoot, 'init-config.yaml'), 'utf8');
 assert.match(initConfig, /^GOOSE_MODE: smart_approve\s*$/m);
+assert.match(initConfig, /^ESI_PROVIDER_PROFILE: team\s*$/m);
+assert.match(initConfig, /^GOOSE_PROVIDER: chatgpt_codex\s*$/m);
+assert.match(initConfig, /^GOOSE_MODEL: gpt-5\.5\s*$/m);
 
-const pathSource = readFileSync(resolve(repoRoot, 'crates', 'goose', 'src', 'config', 'paths.rs'), 'utf8');
+const providerManifest = JSON.parse(
+  readFileSync(resolve(repoRoot, 'provider-profiles', 'manifest.json'), 'utf8')
+);
+assert.equal(providerManifest.schema_version, 1);
+const teamProfile = providerManifest.profiles.find((profile) => profile.id === 'team');
+const operatorProfile = providerManifest.profiles.find((profile) => profile.id === 'operator');
+assert.ok(teamProfile, 'missing team provider profile');
+assert.ok(operatorProfile, 'missing operator provider profile');
+assert.equal(teamProfile.default_provider, 'chatgpt_codex');
+assert.deepEqual(
+  teamProfile.providers.map((provider) => [provider.id, provider.role]),
+  [
+    ['chatgpt_codex', 'primary'],
+    ['claude-acp', 'alternative'],
+  ]
+);
+assert.equal(teamProfile.allow_other_goose_providers, false);
+assert.equal(teamProfile.allow_private_litellm, false);
+assert.equal(teamProfile.allow_private_forgeloop, false);
+for (const providerId of [
+  'chatgpt_codex',
+  'claude-acp',
+  'codex-acp',
+  'openai',
+  'anthropic',
+  'litellm',
+  'ollama',
+  'lmstudio',
+]) {
+  assert.ok(
+    operatorProfile.providers.some((provider) => provider.id === providerId),
+    `operator profile missing ${providerId}`
+  );
+}
+assert.equal(operatorProfile.allow_other_goose_providers, true);
+assert.equal(operatorProfile.allow_private_litellm, true);
+assert.equal(operatorProfile.allow_private_forgeloop, true);
+
+const profileSources = ['manifest.json', 'team.yaml', 'operator.yaml']
+  .map((file) => readFileSync(resolve(repoRoot, 'provider-profiles', file), 'utf8'))
+  .join('\n');
+for (const forbidden of [
+  /LITELLM_(?:HOST|API_KEY)\s*[:=]/,
+  /FORGELOOP_(?:SERVER|SERVER_BEARER_TOKEN)\s*[:=]/,
+  /https?:\/\/[^\s"']*forgeloop/i,
+  /(?:^|[\\/])\.(?:codex|claude)(?:[\\/]|$)/m,
+  /(?:access|refresh|api)[_-]?token\s*[:=]/i,
+]) {
+  assert.ok(!forbidden.test(profileSources), `provider profile leaks forbidden data: ${forbidden}`);
+}
+
+const pathSource = readFileSync(
+  resolve(repoRoot, 'crates', 'goose', 'src', 'config', 'paths.rs'),
+  'utf8'
+);
 assert.ok(pathSource.includes('app_name: "esi-studio"'));
 assert.ok(pathSource.includes('top_level_domain: "ESI"'));
 
@@ -97,8 +159,8 @@ const nativeBranding = [
   },
   {
     source: read('src', 'gooseServeLeaseRegistry.ts'),
-    expected: ["ESI-Studio backend stopped", 'restart ESI-Studio'],
-    forbidden: ["Goose backend stopped", 'restart Goose Desktop'],
+    expected: ['ESI-Studio backend stopped', 'restart ESI-Studio'],
+    forbidden: ['Goose backend stopped', 'restart Goose Desktop'],
   },
   {
     source: read('src', 'toasts.tsx'),

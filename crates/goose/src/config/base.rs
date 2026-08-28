@@ -202,7 +202,8 @@ impl Default for Config {
         let config_dir = Paths::config_dir();
         let user_config_path = config_dir.join(CONFIG_YAML_NAME);
 
-        let mut config_paths = vec![system_config_path()];
+        let mut config_paths: Vec<PathBuf> = distribution_config_path().into_iter().collect();
+        config_paths.push(system_config_path());
         config_paths.extend(additional_config_paths_from_env());
         config_paths.push(user_config_path.clone());
 
@@ -1410,36 +1411,42 @@ fn find_workspace_or_exe_root() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let exe_dir = exe.parent()?.to_path_buf();
 
-    let mut path = exe;
-    while let Some(parent) = path.parent() {
-        let cargo_toml = parent.join("Cargo.toml");
+    let mut path = exe_dir.clone();
+    loop {
+        if path.join("init-config.yaml").is_file() {
+            return Some(path);
+        }
+
+        let cargo_toml = path.join("Cargo.toml");
         if cargo_toml.exists() {
             if let Ok(content) = std::fs::read_to_string(&cargo_toml) {
                 if content.contains("[workspace]") {
-                    return Some(parent.to_path_buf());
+                    return Some(path);
                 }
             }
         }
-        path = parent.to_path_buf();
+
+        if !path.pop() {
+            break;
+        }
     }
 
     Some(exe_dir)
 }
 
+fn distribution_config_path() -> Option<PathBuf> {
+    find_workspace_or_exe_root()
+        .map(|root| root.join("init-config.yaml"))
+        .filter(|path| path.is_file())
+}
+
 pub fn load_init_config_from_workspace() -> Result<Mapping, ConfigError> {
-    let root = find_workspace_or_exe_root().ok_or_else(|| {
+    let init_config_path = distribution_config_path().ok_or_else(|| {
         ConfigError::FileError(std::io::Error::new(
             std::io::ErrorKind::NotFound,
             "Could not determine executable path",
         ))
     })?;
-
-    let init_config_path = root.join("init-config.yaml");
-    if !init_config_path.exists() {
-        return Err(ConfigError::NotFound(
-            "init-config.yaml not found".to_string(),
-        ));
-    }
 
     let init_content = std::fs::read_to_string(&init_config_path)?;
     parse_yaml_content(&init_content)

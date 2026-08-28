@@ -80,8 +80,8 @@
   {
     "id": "forgeloop",
     "name": "forgeloop",
-    "display_name": "ForgeLoop",
-    "description": "Optional deterministic coding-agent execution and validation over MCP.",
+    "display_name": "ForgeLoop (Operator Only)",
+    "description": "Disabled operator-only connection to a separately configured private ForgeLoop service.",
     "enabled": false,
     "type": "stdio",
     "cmd": "forgeloop-mcp",

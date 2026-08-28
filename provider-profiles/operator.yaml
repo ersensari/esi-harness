@@ -1,4 +1,4 @@
-ESI_PROVIDER_PROFILE: team
+ESI_PROVIDER_PROFILE: operator
 GOOSE_MODE: smart_approve
 GOOSE_PROVIDER: chatgpt_codex
 GOOSE_MODEL: gpt-5.5
