@@ -97,20 +97,26 @@ export const currentLocale = resolvedLocale.locale;
 /** Base language for loading message catalogs (e.g. "en"). */
 export const currentMessageLocale = resolvedLocale.messageLocale;
 
+const GOOSE_BRAND_PATTERN = /\b[Gg]oose\b(?!:\/\/)/g;
+
+export function brandMessages(messages: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(messages).map(([id, message]) => [
+      id,
+      message.replace(GOOSE_BRAND_PATTERN, 'ESI-Studio'),
+    ])
+  );
+}
+
 /**
  * Load compiled messages for a given locale.
- * Returns an empty object for English (react-intl uses defaultMessage as fallback).
+ * Applies the distribution brand while preserving Goose compatibility identifiers.
  */
 export async function loadMessages(locale: string): Promise<Record<string, string>> {
-  if (locale === 'en') {
-    // English strings live in source code as defaultMessage — no catalog needed.
-    return {};
-  }
-
   try {
     // Dynamic import so compiled translation bundles are code-split.
     const mod = await import(`./compiled/${locale}.json`);
-    return mod.default ?? mod;
+    return brandMessages(mod.default ?? mod);
   } catch {
     console.warn(
       `[i18n] No message catalog found for locale "${locale}", falling back to English.`

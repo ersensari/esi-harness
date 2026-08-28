@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { getLocale } from './index';
+import { brandMessages, getLocale } from './index';
 
 // Helper to mock window.appConfig for tests
 function mockAppConfig(values: Record<string, unknown>) {
@@ -132,10 +132,22 @@ describe('getLocale', () => {
 });
 
 describe('loadMessages', () => {
-  it('returns empty object for English locale', async () => {
+  it('loads English messages with ESI branding', async () => {
     const { loadMessages } = await import('./index');
     const messages = await loadMessages('en');
-    expect(messages).toEqual({});
+    expect(messages['launcher.placeholder']).toBe('Ask ESI-Studio anything...');
+  });
+
+  it('preserves Goose compatibility identifiers while branding product references', () => {
+    expect(
+      brandMessages({
+        product: 'Ask goose or restart Goose Desktop',
+        compatibility: 'Use goose://recipe, .goosehints, and GOOSE_MODE',
+      })
+    ).toEqual({
+      product: 'Ask ESI-Studio or restart ESI-Studio Desktop',
+      compatibility: 'Use goose://recipe, .goosehints, and GOOSE_MODE',
+    });
   });
 
   it('returns empty object for unsupported locale (with warning)', async () => {

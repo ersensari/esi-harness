@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-sandbox=/usr/lib/goose/chrome-sandbox
+sandbox=/usr/lib/esi-studio/chrome-sandbox
 
 test "$(stat -c '%U:%G' "$sandbox")" = "root:root"
 test "$(stat -c '%a' "$sandbox")" = "4755"
@@ -9,7 +9,7 @@ test "$(stat -c '%a' "$sandbox")" = "4755"
 set +e
 timeout --signal=TERM 15s \
     dbus-run-session -- \
-    xvfb-run -a /usr/lib/goose/Goose --disable-gpu \
+    xvfb-run -a /usr/lib/esi-studio/esi-studio --disable-gpu \
     > /tmp/esi-desktop-smoke.log 2>&1
 status=$?
 set -e

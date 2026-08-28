@@ -263,7 +263,7 @@ pub async fn run_config_mcp<C: Connection>() {
     expected_session_id.set(&session.session_id().0);
 
     let output = session
-        .prompt(prompt, PermissionDecision::Cancel)
+        .prompt(prompt, PermissionDecision::AllowOnce)
         .await
         .unwrap();
     assert_eq!(output.text, FAKE_CODE);
@@ -315,7 +315,7 @@ pub async fn run_fs_read_text_file_true<C: Connection>() {
     expected_session_id.set(&session.session_id().0);
 
     let output = session
-        .prompt(prompt, PermissionDecision::Cancel)
+        .prompt(prompt, PermissionDecision::AllowOnce)
         .await
         .unwrap();
     assert_eq!(output.text, "test-read-content-12345");
@@ -618,7 +618,7 @@ pub async fn run_load_session_mcp<C: Connection>() {
 
     // First prompt: tool should work in the new session.
     let output = session
-        .prompt(prompt, PermissionDecision::Cancel)
+        .prompt(prompt, PermissionDecision::AllowOnce)
         .await
         .unwrap();
     assert_eq!(output.text, FAKE_CODE, "tool call failed in new session");
@@ -633,7 +633,7 @@ pub async fn run_load_session_mcp<C: Connection>() {
 
     // Second prompt: tool should work in the loaded session.
     let output = loaded_session
-        .prompt(prompt, PermissionDecision::Cancel)
+        .prompt(prompt, PermissionDecision::AllowOnce)
         .await
         .unwrap();
     assert_eq!(output.text, FAKE_CODE, "tool call failed in loaded session");
@@ -817,6 +817,7 @@ async fn run_mode_set_impl<C: Connection>(via: SetModeVia) {
 
     let config = TestConnectionConfig {
         data_root: temp_dir.path().to_path_buf(),
+        goose_mode: GooseMode::Auto,
         ..Default::default()
     };
     let mut conn = C::new(config, openai).await;
@@ -1268,7 +1269,7 @@ pub async fn run_prompt_codemode<C: Connection>() {
     expected_session_id.set(&session.session_id().0);
 
     let output = session
-        .prompt(prompt, PermissionDecision::Cancel)
+        .prompt(prompt, PermissionDecision::AllowOnce)
         .await
         .unwrap();
     if matches!(output.tool_status, Some(ToolCallStatus::Failed)) || output.text.contains("error") {
@@ -1311,7 +1312,7 @@ pub async fn run_prompt_image<C: Connection>() {
     let output = session
         .prompt(
             "Use the get_image tool and describe what you see in its result.",
-            PermissionDecision::Cancel,
+            PermissionDecision::AllowOnce,
         )
         .await
         .unwrap();
@@ -1386,7 +1387,7 @@ pub async fn run_prompt_mcp<C: Connection>() {
     let output = session
         .prompt(
             "Use the get_code tool and output only its result.",
-            PermissionDecision::Cancel,
+            PermissionDecision::AllowOnce,
         )
         .await
         .unwrap();

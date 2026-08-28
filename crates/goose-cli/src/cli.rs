@@ -67,7 +67,7 @@ impl From<ServePlatform> for GoosePlatform {
 }
 
 #[derive(Parser)]
-#[command(name = "goose", author, version, display_name = "", about, long_about = None)]
+#[command(name = "esi-studio", author, version, display_name = "", about, long_about = None)]
 pub struct Cli {
     #[command(subcommand)]
     command: Option<Command>,
@@ -134,7 +134,7 @@ pub struct SessionOptions {
         long = "container",
         value_name = "CONTAINER_ID",
         help = "Docker container ID to run extensions inside",
-        long_help = "Run extensions (stdio and built-in) inside the specified container. The extension must exist in the container. For built-in extensions, goose must be installed inside the container."
+        long_help = "Run extensions (stdio and built-in) inside the specified container. The extension must exist in the container. For built-in extensions, ESI-Studio must be installed inside the container."
     )]
     pub container: Option<String>,
 }
@@ -197,7 +197,7 @@ pub struct ExtensionOptions {
         long = "with-builtin",
         value_name = "NAME",
         help = "Add builtin extensions by name (e.g., 'developer' or multiple: 'developer,github')",
-        long_help = "Add one or more builtin extensions that are bundled with goose by specifying their names, comma-separated",
+        long_help = "Add one or more builtin extensions that are bundled with ESI-Studio by specifying their names, comma-separated",
         value_delimiter = ','
     )]
     pub builtins: Vec<String>,
@@ -228,8 +228,8 @@ pub struct InputOptions {
         short = 't',
         long = "text",
         value_name = "TEXT",
-        help = "Input text to provide to goose directly",
-        long_help = "Input text containing commands for goose. Use this in lieu of the instructions argument.",
+        help = "Input text to provide to ESI-Studio directly",
+        long_help = "Input text containing commands for ESI-Studio. Use this in lieu of the instructions argument.",
         conflicts_with = "instructions",
         conflicts_with = "recipe"
     )]
@@ -571,7 +571,7 @@ enum SessionCommand {
 
         #[arg(
             long = "nostr",
-            help = "Publish the JSON session export as an encrypted Nostr event and print a Goose share link"
+            help = "Publish the JSON session export as an encrypted Nostr event and print an ESI-Studio share link"
         )]
         nostr: bool,
 
@@ -588,7 +588,7 @@ enum SessionCommand {
     )]
     Import {
         #[arg(
-            help = "Path to a goose session export, a Claude Code, Codex, or Pi .jsonl transcript, or a goose://sessions/nostr share link"
+            help = "Path to an ESI-Studio session export, a Claude Code, Codex, or Pi .jsonl transcript, or a goose://sessions/nostr share link"
         )]
         input: String,
 
@@ -728,8 +728,8 @@ enum PluginCommand {
 
 #[derive(Subcommand)]
 enum SkillsCommand {
-    /// List all skills available to the goose agent
-    #[command(about = "List all skills available to the goose agent")]
+    /// List all skills available to the ESI-Studio agent
+    #[command(about = "List all skills available to the ESI-Studio agent")]
     List,
 }
 
@@ -761,8 +761,8 @@ enum RecipeCommand {
         params: Vec<String>,
     },
 
-    /// Open a recipe in Goose Desktop
-    #[command(about = "Open a recipe in Goose Desktop")]
+    /// Open a recipe in ESI-Studio
+    #[command(about = "Open a recipe in ESI-Studio")]
     Open {
         /// Recipe name to get recipe file to open
         #[arg(help = "recipe name or full path to the recipe file")]
@@ -801,12 +801,12 @@ enum RecipeCommand {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Configure goose settings
-    #[command(about = "Configure goose settings")]
+    /// Configure ESI-Studio settings
+    #[command(about = "Configure ESI-Studio settings")]
     Configure {},
 
-    /// Display goose configuration information
-    #[command(about = "Display goose information")]
+    /// Display ESI-Studio configuration information
+    #[command(about = "Display ESI-Studio information")]
     Info {
         /// Show verbose information including current configuration
         #[arg(short, long, help = "Show verbose information including config.yaml")]
@@ -815,25 +815,25 @@ enum Command {
         check: bool,
     },
 
-    #[command(about = "Check that your Goose setup is working")]
+    #[command(about = "Check that your ESI-Studio setup is working")]
     Doctor {},
 
     /// Manage system prompts and behaviors
-    #[command(about = "Run one of the mcp servers bundled with goose")]
+    #[command(about = "Run one of the MCP servers bundled with ESI-Studio")]
     Mcp {
         #[arg(value_parser = clap::value_parser!(McpCommand))]
         server: McpCommand,
     },
 
-    /// Run goose as an ACP (Agent Client Protocol) agent
-    #[command(about = "Run goose as an ACP agent server on stdio")]
+    /// Run ESI-Studio as an ACP (Agent Client Protocol) agent
+    #[command(about = "Run ESI-Studio as an ACP agent server on stdio")]
     Acp {
         /// Add builtin extensions by name
         #[arg(
             long = "with-builtin",
             value_name = "NAME",
             help = "Add builtin extensions by name (e.g., 'developer' or multiple: 'developer,github')",
-            long_help = "Add one or more builtin extensions that are bundled with goose by specifying their names, comma-separated",
+            long_help = "Add one or more builtin extensions that are bundled with ESI-Studio by specifying their names, comma-separated",
             value_delimiter = ','
         )]
         builtins: Vec<String>,
@@ -875,7 +875,7 @@ enum Command {
             long = "with-builtin",
             value_name = "NAME",
             help = "Add builtin extensions by name (e.g., 'developer' or multiple: 'developer,github')",
-            long_help = "Add one or more builtin extensions that are bundled with goose by specifying their names, comma-separated",
+            long_help = "Add one or more builtin extensions that are bundled with ESI-Studio by specifying their names, comma-separated",
             value_delimiter = ',',
             action = clap::ArgAction::Append
         )]
@@ -1027,9 +1027,9 @@ enum Command {
         command: GatewayCommand,
     },
 
-    /// Update the goose CLI version
+    /// Update the ESI-Studio CLI version
     #[cfg(feature = "update")]
-    #[command(about = "Update the goose CLI version")]
+    #[command(about = "Update the ESI-Studio CLI version")]
     Update {
         /// Update to canary version
         #[arg(
@@ -1040,15 +1040,15 @@ enum Command {
         )]
         canary: bool,
 
-        /// Enforce to re-configure goose during update
-        #[arg(short, long, help = "Enforce to re-configure goose during update")]
+        /// Enforce ESI-Studio reconfiguration during update
+        #[arg(short, long, help = "Enforce ESI-Studio reconfiguration during update")]
         reconfigure: bool,
     },
 
     /// Terminal-integrated session (one session per terminal)
     #[command(
-        about = "Terminal-integrated goose session",
-        long_about = "Runs a goose session tied to your terminal window.\n\
+        about = "Terminal-integrated ESI-Studio session",
+        long_about = "Runs an ESI-Studio session tied to your terminal window.\n\
                       Each terminal maintains its own persistent session that resumes automatically.\n\n\
                       Setup:\n  \
                         eval \"$(goose term init zsh)\"  # zsh/bash\n  \
@@ -1079,7 +1079,11 @@ enum Command {
         #[arg(value_enum)]
         shell: CompletionShell,
 
-        #[arg(long, default_value = "goose", help = "Provide a custom binary name")]
+        #[arg(
+            long,
+            default_value = "esi-studio",
+            help = "Provide a custom binary name"
+        )]
         bin_name: String,
     },
 
@@ -1088,8 +1092,8 @@ enum Command {
     /// Discovers `**/.agents/checks/*.md` subagent reviewers and
     /// `**/.agents/REVIEW.md` scoped prompt overrides, builds a review
     /// request from the working tree (or an explicit diff range), and
-    /// runs the review through goose.
-    #[command(about = "Review the current diff using goose")]
+    /// runs the review through ESI-Studio.
+    #[command(about = "Review the current diff using ESI-Studio")]
     Review {
         /// Diff range to review (e.g. "main...HEAD"). Defaults to the working
         /// tree vs HEAD.

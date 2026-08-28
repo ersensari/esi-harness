@@ -52,5 +52,42 @@
     "type": "builtin",
     "env_keys": [],
     "bundled": true
+  },
+  {
+    "id": "esi-wiki",
+    "name": "esi-wiki",
+    "display_name": "ESI-Wiki",
+    "description": "Shared project knowledge, provenance, review, and publication over MCP.",
+    "enabled": false,
+    "type": "streamable_http",
+    "uri": "http://127.0.0.1:8090/mcp",
+    "timeout": 300,
+    "bundled": true
+  },
+  {
+    "id": "esi-innovation",
+    "name": "esi-innovation",
+    "display_name": "ESI-Innovation",
+    "description": "Deterministic, human-gated research and prototype workflow over MCP.",
+    "enabled": false,
+    "type": "stdio",
+    "cmd": "esi-innovation-mcp",
+    "args": [],
+    "env_keys": [],
+    "timeout": 300,
+    "bundled": true
+  },
+  {
+    "id": "forgeloop",
+    "name": "forgeloop",
+    "display_name": "ForgeLoop",
+    "description": "Optional deterministic coding-agent execution and validation over MCP.",
+    "enabled": false,
+    "type": "stdio",
+    "cmd": "forgeloop-mcp",
+    "args": [],
+    "env_keys": ["FORGELOOP_SERVER", "FORGELOOP_SERVER_BEARER_TOKEN"],
+    "timeout": 1800,
+    "bundled": true
   }
 ]

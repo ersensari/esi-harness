@@ -5,9 +5,12 @@ const { resolve } = require('path');
 const isLinuxVulkanBuild = process.env.GOOSE_DESKTOP_LINUX_VARIANT === 'vulkan';
 
 let cfg = {
+  name: 'ESI-Studio',
+  executableName: 'esi-studio',
+  appBundleId: 'ai.esi.studio',
   asar: true,
   extraResource: ['src/bin', 'src/images', 'src/app-update.yml'],
-  icon: 'src/images/icon',
+  icon: 'src/images/esi-icon',
   // Windows specific configuration
   win32: {
     icon: 'src/images/icon.ico',
@@ -65,8 +68,8 @@ module.exports = {
       name: '@electron-forge/publisher-github',
       config: {
         repository: {
-          owner: process.env.GITHUB_OWNER || 'aaif-goose',
-          name: process.env.GITHUB_REPO || 'goose',
+          owner: process.env.GITHUB_OWNER || 'ersensari',
+          name: process.env.GITHUB_REPO || 'esi-harness',
         },
         prerelease: false,
         draft: true,
@@ -87,14 +90,14 @@ module.exports = {
     {
       name: '@electron-forge/maker-deb',
       config: {
-        name: 'Goose',
-        bin: 'Goose',
-        maintainer: 'AAIF (Agentic AI Foundation)',
-        homepage: 'https://goose-docs.ai/',
+        name: 'esi-studio',
+        bin: 'esi-studio',
+        maintainer: 'ESI',
+        homepage: 'https://github.com/ersensari/esi-harness',
         categories: ['Development'],
         desktopTemplate: './forge.deb.desktop',
         options: {
-          icon: 'src/images/icon.png',
+          icon: 'src/images/esi-icon.png',
           prefix: '/opt',
           ...(isLinuxVulkanBuild ? { depends: ['libvulkan1'] } : {}),
         },
@@ -103,14 +106,14 @@ module.exports = {
     {
       name: '@electron-forge/maker-rpm',
       config: {
-        name: 'Goose',
-        bin: 'Goose',
-        maintainer: 'AAIF (Agentic AI Foundation)',
-        homepage: 'https://goose-docs.ai/',
+        name: 'esi-studio',
+        bin: 'esi-studio',
+        maintainer: 'ESI',
+        homepage: 'https://github.com/ersensari/esi-harness',
         categories: ['Development'],
         desktopTemplate: './forge.rpm.desktop',
         options: {
-          icon: 'src/images/icon.png',
+          icon: 'src/images/esi-icon.png',
           prefix: '/opt',
           ...(isLinuxVulkanBuild ? { requires: ['vulkan-loader'] } : {}),
         },
@@ -120,17 +123,17 @@ module.exports = {
       name: '@electron-forge/maker-flatpak',
       config: {
         options: {
-          id: 'io.github.block.Goose', // NOTE: kept for backwards compat with existing installs
+          id: 'ai.esi.Studio',
           categories: ['Development'],
           mimeType: ['x-scheme-handler/goose'],
           icon: {
-            scalable: 'src/images/icon.svg',
-            '512x512': 'src/images/icon-512.png',
+            scalable: 'src/images/esi-icon.svg',
+            '512x512': 'src/images/esi-icon-512.png',
           },
-          homepage: 'https://goose-docs.ai/',
+          homepage: 'https://github.com/ersensari/esi-harness',
           runtimeVersion: '25.08',
           baseVersion: '25.08',
-          bin: 'Goose',
+          bin: 'esi-studio',
           modules: [
             {
               name: 'libbz2-shim',

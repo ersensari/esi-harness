@@ -162,13 +162,13 @@ fn system_config_path() -> PathBuf {
 
     #[cfg(unix)]
     {
-        PathBuf::from("/etc/goose/config.yaml")
+        PathBuf::from("/etc/esi-studio/config.yaml")
     }
     #[cfg(windows)]
     {
         env::var("PROGRAMDATA")
-            .map(|d| PathBuf::from(d).join("goose").join("config.yaml"))
-            .unwrap_or_else(|_| PathBuf::from(r"C:\ProgramData\goose\config.yaml"))
+            .map(|d| PathBuf::from(d).join("esi-studio").join("config.yaml"))
+            .unwrap_or_else(|_| PathBuf::from(r"C:\ProgramData\esi-studio\config.yaml"))
     }
 }
 

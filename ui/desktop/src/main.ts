@@ -93,7 +93,7 @@ const MENU_TRANSLATIONS_ZH_CN: Record<string, string> = {
   Cut: '剪切',
   Copy: '复制',
   Paste: '粘贴',
-  // Goose-added items
+  // ESI-Studio-added items
   'New Window': '新建窗口',
   Settings: '设置',
   'Find…': '查找…',
@@ -105,11 +105,11 @@ const MENU_TRANSLATIONS_ZH_CN: Record<string, string> = {
   'New Chat Window': '新建聊天窗口',
   'Open Directory...': '打开目录…',
   'Recent Directories': '最近的目录',
-  'Focus Goose Window': '聚焦 Goose 窗口',
+  'Focus ESI-Studio Window': '聚焦 ESI-Studio 窗口',
   'Quick Launcher': '快速启动器',
   'Always on Top': '窗口置顶',
   'Toggle Navigation': '切换导航',
-  'About Goose': '关于 Goose',
+  'About ESI-Studio': '关于 ESI-Studio',
   // Electron's default role-based labels we want to translate as well.
   // (The menu role itself still provides the correct behaviour; only the
   // display string is overridden.)
@@ -135,7 +135,7 @@ const MENU_TRANSLATIONS_ZH_CN: Record<string, string> = {
   'Bring All to Front': '全部置于最前',
   'Emoji & Symbols': '表情符号',
   'Start Dictation…': '开始听写…',
-  'Hide Goose': '隐藏 Goose',
+  'Hide ESI-Studio': '隐藏 ESI-Studio',
   'Hide Others': '隐藏其他',
   'Show All': '全部显示',
   Services: '服务',
@@ -778,7 +778,7 @@ app.on('open-url', async (_event, url) => {
 app.on('will-finish-launching', () => {
   if (process.platform === 'darwin') {
     app.setAboutPanelOptions({
-      applicationName: 'Goose',
+      applicationName: 'ESI-Studio',
       applicationVersion: app.getVersion(),
     });
   }
@@ -833,7 +833,7 @@ async function handleFileOpen(filePath: string) {
 
     // Show user-friendly error notification
     new Notification({
-      title: 'Goose',
+      title: 'ESI-Studio',
       body: `Could not open directory: ${path.basename(filePath)}`,
     }).show();
   }
@@ -1243,7 +1243,7 @@ const createChat = async (
       log.error('goose serve failed to start', error);
       dialog.showMessageBoxSync({
         type: 'error',
-        title: 'Goose Failed to Start',
+        title: 'ESI-Studio Failed to Start',
         message: 'The backend server failed to start.',
         detail: [
           'Backend: goose serve',
@@ -2696,7 +2696,7 @@ async function appMain() {
     if (shortcuts.focusWindow) {
       fileMenu.submenu.append(
         new MenuItem({
-          label: menuT('Focus Goose Window'),
+          label: menuT('Focus ESI-Studio Window'),
           accelerator: shortcuts.focusWindow,
           click() {
             focusWindow();
@@ -2803,15 +2803,15 @@ async function appMain() {
         helpMenu.submenu.append(new MenuItem({ type: 'separator' }));
       }
 
-      // Create the About Goose menu item with a submenu
-      const aboutGooseMenuItem = new MenuItem({
-        label: menuT('About Goose'),
+      // Create the About ESI-Studio menu item with a submenu
+      const aboutEsiStudioMenuItem = new MenuItem({
+        label: menuT('About ESI-Studio'),
         submenu: Menu.buildFromTemplate([]), // Start with an empty submenu for About
       });
 
-      // Add the Version menu item (display only) to the About Goose submenu
-      if (aboutGooseMenuItem.submenu) {
-        aboutGooseMenuItem.submenu.append(
+      // Add the Version menu item (display only) to the About ESI-Studio submenu
+      if (aboutEsiStudioMenuItem.submenu) {
+        aboutEsiStudioMenuItem.submenu.append(
           new MenuItem({
             label: `Version ${version || app.getVersion()}`,
             enabled: false,
@@ -2819,7 +2819,7 @@ async function appMain() {
         );
       }
 
-      helpMenu.submenu.append(aboutGooseMenuItem);
+      helpMenu.submenu.append(aboutEsiStudioMenuItem);
     }
   }
 

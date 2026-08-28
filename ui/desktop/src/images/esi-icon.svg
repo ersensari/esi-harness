@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="ESI-Studio">
+  <rect width="1024" height="1024" rx="192" fill="#101714"/>
+  <path d="M224 238h576v116H350v100h354v112H350v104h450v116H224z" fill="#e8f0ea"/>
+  <path d="M650 238h150v548H650z" fill="#3ddc97"/>
+  <circle cx="725" cy="718" r="54" fill="#ff6b5f"/>
+</svg>

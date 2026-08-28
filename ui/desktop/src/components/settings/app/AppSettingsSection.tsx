@@ -511,7 +511,7 @@ export default function AppSettingsSection({ scrollToSection }: AppSettingsSecti
             <Button
               onClick={() => {
                 window.open(
-                  'https://github.com/aaif-goose/goose/issues/new?template=bug_report.md',
+                  'https://github.com/ersensari/esi-harness/issues/new?template=bug_report.md',
                   '_blank'
                 );
               }}
@@ -523,7 +523,7 @@ export default function AppSettingsSection({ scrollToSection }: AppSettingsSecti
             <Button
               onClick={() => {
                 window.open(
-                  'https://github.com/aaif-goose/goose/issues/new?template=feature_request.md',
+                  'https://github.com/ersensari/esi-harness/issues/new?template=feature_request.md',
                   '_blank'
                 );
               }}

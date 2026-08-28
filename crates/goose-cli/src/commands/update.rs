@@ -286,7 +286,7 @@ async fn verify_provenance(archive_data: &[u8], tag: &str) -> Result<()> {
     ))
 }
 
-/// Update the goose binary to the latest release.
+/// Update the ESI-Studio binary to the latest release.
 ///
 /// Downloads the platform-appropriate archive from GitHub releases, verifies
 /// its SLSA provenance via Sigstore, extracts it with path-traversal
@@ -357,13 +357,13 @@ pub async fn update(canary: bool, reconfigure: bool) -> Result<()> {
 
         // --- Reconfigure if requested -------------------------------------------
         if reconfigure {
-            println!("Running goose configure...");
+            println!("Running esi-studio configure...");
             let status = Command::new(current_exe)
                 .arg("configure")
                 .status()
-                .context("Failed to run goose configure")?;
+                .context("Failed to run esi-studio configure")?;
             if !status.success() {
-                eprintln!("Warning: goose configure exited with {status}");
+                eprintln!("Warning: esi-studio configure exited with {status}");
             }
         }
 

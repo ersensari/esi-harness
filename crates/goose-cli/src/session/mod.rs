@@ -791,7 +791,7 @@ impl CliSession {
                     None => {
                         output::render_error(
                             "No editor found. Set one with:\n  \
-                                 goose configure set goose_prompt_editor \"vim\"\n  \
+                                 esi-studio configure set goose_prompt_editor \"vim\"\n  \
                                  or set $VISUAL or $EDITOR in your shell.",
                         );
                     }
@@ -1056,7 +1056,7 @@ impl CliSession {
             Err(e) => {
                 output::render_error(&format!(
                     "Cannot switch to provider '{}': {}\n\
-                         Set credentials via `goose configure` or the appropriate environment variable.\n\
+                         Set credentials via `esi-studio configure` or the appropriate environment variable.\n\
                          Session continues with current provider '{}'.",
                     target_provider_name, e, current_provider_name
                 ));
@@ -2756,7 +2756,7 @@ async fn get_reasoner(
         println!("WARNING: GOOSE_PLANNER_PROVIDER not found. Using default provider...");
         config
             .get_goose_provider()
-            .expect("No provider configured. Run 'goose configure' first")
+            .expect("No provider configured. Run 'esi-studio configure' first")
     };
 
     // Try planner-specific model first, fall back to default model
@@ -2766,7 +2766,7 @@ async fn get_reasoner(
         println!("WARNING: GOOSE_PLANNER_MODEL not found. Using default model...");
         config
             .get_goose_model()
-            .expect("No model configured. Run 'goose configure' first")
+            .expect("No model configured. Run 'esi-studio configure' first")
     };
 
     let planner_context_limit = match env::var(GOOSE_PLANNER_CONTEXT_LIMIT)

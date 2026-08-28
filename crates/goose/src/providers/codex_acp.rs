@@ -23,7 +23,7 @@ fn resolve_goose_mode(
 ) -> Result<GooseMode, ConfigError> {
     match configured_mode {
         Ok(mode) => Ok(mode),
-        Err(ConfigError::NotFound(_)) => Ok(GooseMode::Auto),
+        Err(ConfigError::NotFound(_)) => Ok(GooseMode::default()),
         Err(error) => Err(error),
     }
 }
@@ -131,10 +131,10 @@ mod tests {
     }
 
     #[test]
-    fn missing_goose_mode_defaults_to_auto() {
+    fn missing_goose_mode_defaults_to_smart_approve() {
         assert_eq!(
             resolve_goose_mode(Err(ConfigError::NotFound("GOOSE_MODE".to_string()))).unwrap(),
-            GooseMode::Auto
+            GooseMode::SmartApprove
         );
     }
 

@@ -4,6 +4,14 @@ use std::path::PathBuf;
 
 pub struct Paths;
 
+fn app_strategy_args() -> AppStrategyArgs {
+    AppStrategyArgs {
+        top_level_domain: "ESI".to_string(),
+        author: "ESI".to_string(),
+        app_name: "esi-studio".to_string(),
+    }
+}
+
 impl Paths {
     fn get_dir(dir_type: DirType) -> PathBuf {
         if let Some(base) = Self::path_root() {
@@ -16,15 +24,8 @@ impl Paths {
                 DirType::AgentsHome => base.join(".agents"),
             }
         } else {
-            // NOTE: "Block" is kept here for backwards compatibility with existing
-            // user config/data directories (e.g. ~/Library/Application Support/Block/goose/).
-            // Changing this would orphan existing installations.
-            let strategy = choose_app_strategy(AppStrategyArgs {
-                top_level_domain: "Block".to_string(),
-                author: "Block".to_string(),
-                app_name: "goose".to_string(),
-            })
-            .expect("goose requires a home dir");
+            let strategy =
+                choose_app_strategy(app_strategy_args()).expect("ESI-Studio requires a home dir");
 
             match dir_type {
                 DirType::Config => strategy.config_dir(),
@@ -97,7 +98,7 @@ enum DirType {
 
 #[cfg(test)]
 mod tests {
-    use super::Paths;
+    use super::{app_strategy_args, Paths};
     use std::ffi::OsString;
 
     #[test]
@@ -116,5 +117,13 @@ mod tests {
             Paths::validated_path_root(Some(absolute.clone().into_os_string())),
             Some(absolute)
         );
+    }
+
+    #[test]
+    fn default_app_strategy_is_isolated_for_esi_studio() {
+        let args = app_strategy_args();
+        assert_eq!(args.top_level_domain, "ESI");
+        assert_eq!(args.author, "ESI");
+        assert_eq!(args.app_name, "esi-studio");
     }
 }

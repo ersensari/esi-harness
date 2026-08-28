@@ -539,10 +539,10 @@ fn print_editor_help() {
   /edit opens your configured editor for composing prompts.
   Use '/edit some text' to pre-fill the editor with initial text.
   Previous conversation is included as markdown headings for context.
-  Configure editor: goose configure set goose_prompt_editor \"vim\"
+    Configure editor: esi-studio configure set goose_prompt_editor \"vim\"
   Falls back to $VISUAL or $EDITOR if goose_prompt_editor is not set.
   When goose_prompt_editor is set, the editor is used for every prompt by default.
-  To use inline prompts with on-demand /edit: goose configure set goose_prompt_editor_always false"
+    To use inline prompts with on-demand /edit: esi-studio configure set goose_prompt_editor_always false"
     );
 }
 

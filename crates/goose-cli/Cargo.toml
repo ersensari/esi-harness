@@ -16,6 +16,10 @@ name = "goose"
 path = "src/main.rs"
 
 [[bin]]
+name = "esi-studio"
+path = "src/bin/esi-studio.rs"
+
+[[bin]]
 name = "generate_manpages"
 path = "src/bin/generate_manpages.rs"
 

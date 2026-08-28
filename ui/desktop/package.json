@@ -1,8 +1,8 @@
 {
-  "name": "goose-app",
-  "productName": "Goose",
+  "name": "esi-studio-app",
+  "productName": "ESI-Studio",
   "version": "1.48.0",
-  "description": "Goose App",
+  "description": "Local-first AI studio for software engineering and team innovation",
   "engines": {
     "node": "^24.10.0",
     "pnpm": ">=10.30.0"
@@ -36,6 +36,7 @@
     "test:run": "vitest run",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
+    "test:esi-distribution": "node scripts/verify-esi-distribution.mjs",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:providers": "vitest run --config vitest.integration.config.ts tests/integration/test_providers.test.ts",
     "test:integration:providers-code-exec": "vitest run --config vitest.integration.config.ts tests/integration/test_providers_code_exec.test.ts",
