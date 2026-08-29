@@ -68,10 +68,11 @@
     "id": "esi-wiki",
     "name": "esi-wiki",
     "display_name": "ESI-Wiki",
-    "description": "Shared project knowledge, provenance, review, and publication over MCP.",
+    "description": "Authenticated shared project tracking, knowledge, revisions, and provenance. Configure your ESI-Wiki MCP endpoint and dedicated Wiki authorization before enabling.",
     "enabled": false,
     "type": "streamable_http",
-    "uri": "http://127.0.0.1:8090/mcp",
+    "uri": "",
+    "env_keys": [],
     "timeout": 300,
     "bundled": true
   },

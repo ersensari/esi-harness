@@ -29,6 +29,15 @@ assert.deepEqual(developmentVisualizer.env_keys, []);
 const forgeLoop = extensions.find((candidate) => candidate.id === 'forgeloop');
 assert.equal(forgeLoop.display_name, 'ForgeLoop (Operator Only)');
 assert.match(forgeLoop.description, /operator-only/i);
+const wiki = extensions.find((candidate) => candidate.id === 'esi-wiki');
+assert.equal(wiki.type, 'streamable_http');
+assert.equal(wiki.uri, '', 'ESI-Wiki endpoint must be supplied by the user');
+assert.deepEqual(wiki.env_keys, []);
+assert.match(wiki.description, /authenticated/i);
+assert.match(wiki.description, /configure/i);
+assert.ok(!('headers' in wiki), 'ESI-Wiki must not bundle authorization headers');
+assert.ok(!('client_id' in wiki), 'ESI-Wiki must not bundle an OAuth client identity');
+assert.ok(!('client_secret_key' in wiki), 'ESI-Wiki must not bundle a client secret reference');
 
 const forgeConfig = read('forge.config.ts');
 for (const expected of [
