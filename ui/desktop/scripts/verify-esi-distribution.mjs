@@ -20,6 +20,12 @@ for (const id of ['esi-wiki', 'esi-innovation', 'forgeloop']) {
   assert.equal(extension.enabled, false, `${id} must be disabled by default`);
   assert.equal(extension.bundled, true, `${id} must be managed by the distribution`);
 }
+const developmentVisualizer = extensions.find(
+  (candidate) => candidate.id === 'esi-development-visualizer'
+);
+assert.equal(developmentVisualizer.type, 'builtin');
+assert.equal(developmentVisualizer.enabled, true);
+assert.deepEqual(developmentVisualizer.env_keys, []);
 const forgeLoop = extensions.find((candidate) => candidate.id === 'forgeloop');
 assert.equal(forgeLoop.display_name, 'ForgeLoop (Operator Only)');
 assert.match(forgeLoop.description, /operator-only/i);
@@ -71,6 +77,16 @@ for (const expected of [
 ]) {
   assert.ok(developmentSkill.includes(expected), `missing development skill contract: ${expected}`);
 }
+
+const visualizerSource = readFileSync(
+  resolve(repoRoot, 'crates', 'esi-development-visualizer', 'src', 'lib.rs'),
+  'utf8'
+);
+assert.ok(visualizerSource.includes('ui://esi-development/run'));
+assert.ok(visualizerSource.includes('DevelopmentState::load'));
+assert.ok(!visualizerSource.includes('FORGELOOP_SERVER'));
+assert.ok(!visualizerSource.includes('LITELLM_'));
+assert.ok(existsSync(resolve(repoRoot, 'crates', 'esi-development-visualizer', 'src', 'app.html')));
 for (const forbidden of [
   /https?:\/\//,
   /LITELLM_/,

@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use thiserror::Error;
 
-pub(crate) const SCHEMA_VERSION: u32 = 1;
+pub(crate) const SCHEMA_VERSION: u32 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -226,6 +226,14 @@ pub struct WorktreeBinding {
     pub initial_snapshot_id: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeSnapshot {
+    pub head: String,
+    pub snapshot_id: String,
+    pub dirty: bool,
+    pub changed_files: Vec<String>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct WorktreeReadyApproval {
     pub run_id: String,
@@ -278,6 +286,9 @@ pub enum DevelopmentEventKind {
         worktree_path: PathBuf,
         snapshot_id: String,
     },
+    WorktreeInspected {
+        snapshot: WorktreeSnapshot,
+    },
     ValidationFinished {
         run: ValidationRun,
     },
@@ -310,6 +321,8 @@ pub struct DevelopmentState {
     pub(crate) brief: Option<Brief>,
     pub(crate) plan: Option<ImplementationPlan>,
     pub(crate) worktree: Option<WorktreeBinding>,
+    #[serde(default)]
+    pub(crate) worktree_snapshot: Option<WorktreeSnapshot>,
     pub(crate) repair_policy: RepairPolicy,
     pub(crate) repair_attempts: BTreeMap<FailureCategory, u32>,
     pub(crate) repair_extensions: BTreeMap<FailureCategory, u32>,

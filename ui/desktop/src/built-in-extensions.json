@@ -27,6 +27,15 @@
     "timeout": 300
   },
   {
+    "id": "esi-development-visualizer",
+    "name": "ESI Development Visualizer",
+    "description": "Inspect local development stages, worktree changes, validation evidence, repair budgets, and approvals.",
+    "enabled": true,
+    "type": "builtin",
+    "env_keys": [],
+    "timeout": 300
+  },
+  {
     "id": "memory",
     "name": "Memory",
     "description": "Teach goose your preferences as you go.",

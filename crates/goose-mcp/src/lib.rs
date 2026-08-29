@@ -20,6 +20,7 @@ pub mod tutorial;
 
 pub use autovisualiser::AutoVisualiserRouter;
 pub use computercontroller::ComputerControllerServer;
+pub use esi_development_visualizer::DevelopmentVisualizerServer;
 pub use memory::MemoryServer;
 pub use tutorial::TutorialServer;
 
@@ -52,11 +53,36 @@ macro_rules! builtin {
     }};
 }
 
+fn spawn_esi_development_visualizer(
+    reader: tokio::io::DuplexStream,
+    writer: tokio::io::DuplexStream,
+) {
+    spawn_and_serve(
+        "esi-development-visualizer",
+        DevelopmentVisualizerServer::new(),
+        (reader, writer),
+    );
+}
+
 pub static BUILTIN_EXTENSIONS: Lazy<HashMap<&'static str, SpawnServerFn>> = Lazy::new(|| {
     HashMap::from([
         builtin!(autovisualiser, AutoVisualiserRouter),
         builtin!(computercontroller, ComputerControllerServer),
+        (
+            "esi-development-visualizer",
+            spawn_esi_development_visualizer as SpawnServerFn,
+        ),
         builtin!(memory, MemoryServer),
         builtin!(tutorial, TutorialServer),
     ])
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn esi_development_visualizer_is_bundled() {
+        assert!(BUILTIN_EXTENSIONS.contains_key("esi-development-visualizer"));
+    }
+}

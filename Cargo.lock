@@ -4280,6 +4280,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "esi-development-visualizer"
+version = "1.48.0"
+dependencies = [
+ "esi-development",
+ "esi-workspace",
+ "rmcp 3.1.4",
+ "schemars 1.2.2",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "esi-workspace"
 version = "1.48.0"
 dependencies = [
@@ -5499,6 +5513,7 @@ dependencies = [
  "base64 0.23.1",
  "chrono",
  "docx-rs",
+ "esi-development-visualizer",
  "etcetera",
  "image 0.24.9",
  "include_dir",

@@ -1,0 +1,24 @@
+[package]
+name = "esi-development-visualizer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Read-only MCP App visualizer for ESI local development runs"
+
+[lints]
+workspace = true
+
+[dependencies]
+esi-development = { version = "1.48.0", path = "../esi-development" }
+rmcp = { workspace = true, features = ["server", "macros"] }
+schemars.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[dev-dependencies]
+esi-workspace = { path = "../esi-workspace" }
+tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt"] }

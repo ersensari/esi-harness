@@ -33,6 +33,17 @@
     "bundled": true
   },
   {
+    "id": "esi-development-visualizer",
+    "name": "esi-development-visualizer",
+    "display_name": "ESI Development Visualizer",
+    "description": "Read-only local development stages, worktree changes, validation evidence, repair budgets, and approvals.",
+    "enabled": true,
+    "type": "builtin",
+    "env_keys": [],
+    "timeout": 300,
+    "bundled": true
+  },
+  {
     "id": "memory",
     "name": "memory",
     "display_name": "Memory",

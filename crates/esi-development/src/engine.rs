@@ -72,6 +72,7 @@ impl DevelopmentState {
             brief: None,
             plan: None,
             worktree: None,
+            worktree_snapshot: None,
             repair_policy,
             repair_attempts: BTreeMap::new(),
             repair_extensions: BTreeMap::new(),
@@ -96,6 +97,30 @@ impl DevelopmentState {
 
     pub fn worktree(&self) -> Option<&WorktreeBinding> {
         self.worktree.as_ref()
+    }
+
+    pub fn worktree_snapshot(&self) -> Option<&WorktreeSnapshot> {
+        self.worktree_snapshot.as_ref()
+    }
+
+    pub fn brief(&self) -> Option<&Brief> {
+        self.brief.as_ref()
+    }
+
+    pub fn plan(&self) -> Option<&ImplementationPlan> {
+        self.plan.as_ref()
+    }
+
+    pub fn repair_policy(&self) -> &RepairPolicy {
+        &self.repair_policy
+    }
+
+    pub fn repair_extensions(&self) -> &BTreeMap<FailureCategory, u32> {
+        &self.repair_extensions
+    }
+
+    pub fn fingerprint_occurrences(&self) -> &BTreeMap<FailureFingerprint, u32> {
+        &self.fingerprint_occurrences
     }
 
     pub fn validation_runs(&self) -> &[ValidationRun] {
@@ -173,6 +198,7 @@ impl DevelopmentState {
             worktree_path: identity.worktree_path.clone(),
             snapshot_id: inspection.snapshot_id.clone(),
         });
+        self.record_worktree_snapshot(inspection);
         self.emit(DevelopmentEventKind::HumanApprovalRecorded {
             gate: "worktree_ready".to_string(),
             approved_by: approval.approved_by,
@@ -198,6 +224,7 @@ impl DevelopmentState {
             return Err(self.invalid_transition(DevelopmentStage::DeterministicValidate));
         }
         self.verify_bound_worktree(inspection)?;
+        self.record_worktree_snapshot(inspection);
         self.transition(DevelopmentStage::DeterministicValidate)?;
         let commands = self
             .plan
@@ -453,7 +480,20 @@ impl DevelopmentState {
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, DevelopmentError> {
-        let state: Self = serde_json::from_slice(&fs::read(path)?)?;
+        let mut state: Self = serde_json::from_slice(&fs::read(path)?)?;
+        if state.schema_version == 1 {
+            state.schema_version = SCHEMA_VERSION;
+            if let Some(binding) = &state.worktree {
+                let snapshot = WorktreeSnapshot {
+                    head: binding.initial_head.clone(),
+                    snapshot_id: binding.initial_snapshot_id.clone(),
+                    dirty: false,
+                    changed_files: Vec::new(),
+                };
+                state.worktree_snapshot = Some(snapshot.clone());
+                state.emit(DevelopmentEventKind::WorktreeInspected { snapshot });
+            }
+        }
         state.validate_persisted_state()?;
         Ok(state)
     }
@@ -528,6 +568,17 @@ impl DevelopmentState {
         Ok(())
     }
 
+    fn record_worktree_snapshot(&mut self, inspection: &WorktreeInspection) {
+        let snapshot = WorktreeSnapshot {
+            head: inspection.head.clone(),
+            snapshot_id: inspection.snapshot_id.clone(),
+            dirty: inspection.dirty,
+            changed_files: inspection.changed_files.clone(),
+        };
+        self.worktree_snapshot = Some(snapshot.clone());
+        self.emit(DevelopmentEventKind::WorktreeInspected { snapshot });
+    }
+
     fn ensure_stage(
         &self,
         expected: DevelopmentStage,
@@ -573,11 +624,25 @@ impl DevelopmentState {
                     .is_some_and(|run| run.passed && run.snapshot_id == *snapshot_id)
             },
         );
+        let latest_event_snapshot = self
+            .events
+            .iter()
+            .rev()
+            .find_map(|event| match &event.event {
+                DevelopmentEventKind::WorktreeInspected { snapshot } => Some(snapshot),
+                _ => None,
+            });
+        let worktree_snapshot_consistent = match (&self.worktree, &self.worktree_snapshot) {
+            (None, None) => latest_event_snapshot.is_none(),
+            (Some(_), Some(snapshot)) => latest_event_snapshot == Some(snapshot),
+            _ => false,
+        };
         if self.schema_version != SCHEMA_VERSION
             || self.events.is_empty()
             || !sequences_valid
             || !history_valid
             || !validated_stage_consistent
+            || !worktree_snapshot_consistent
         {
             return Err(DevelopmentError::InvalidPersistedState);
         }

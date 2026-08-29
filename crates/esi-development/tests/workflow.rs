@@ -291,6 +291,9 @@ fn persisted_state_resumes_with_typed_event_history() {
     )])
     .unwrap();
     let (mut state, inspection) = ready_state(temp.path(), validation, RepairPolicy::default());
+    let mut inspection = inspection;
+    inspection.dirty = true;
+    inspection.changed_files = vec!["src/lib.rs".to_string(), "tests/workflow.rs".to_string()];
     state.validate(&inspection).unwrap();
     state.save(&state_path).unwrap();
 
@@ -298,11 +301,54 @@ fn persisted_state_resumes_with_typed_event_history() {
 
     assert_eq!(resumed, state);
     assert_eq!(resumed.stage(), DevelopmentStage::Review);
+    assert_eq!(
+        resumed.worktree_snapshot().unwrap().changed_files,
+        ["src/lib.rs", "tests/workflow.rs"]
+    );
+    assert!(resumed.events().iter().any(|event| matches!(
+        &event.event,
+        DevelopmentEventKind::WorktreeInspected { snapshot }
+            if snapshot.changed_files == ["src/lib.rs", "tests/workflow.rs"]
+    )));
     assert!(resumed
         .events()
         .iter()
         .enumerate()
         .all(|(index, event)| event.sequence == index as u64 + 1));
+}
+
+#[test]
+fn schema_one_state_migrates_to_a_typed_worktree_snapshot_event() {
+    let temp = TempDir::new().unwrap();
+    let state_path = temp.path().join("state-v1.json");
+    let validation = ValidationPlan::new(vec![command(
+        "scope",
+        ValidationCategory::Scope,
+        "/bin/true",
+        &[],
+    )])
+    .unwrap();
+    let (state, _) = ready_state(temp.path(), validation, RepairPolicy::default());
+    let mut legacy = serde_json::to_value(state).unwrap();
+    legacy["schema_version"] = serde_json::json!(1);
+    legacy.as_object_mut().unwrap().remove("worktree_snapshot");
+    let events = legacy["events"].as_array_mut().unwrap();
+    events.retain(|event| event["event"]["kind"] != "worktree_inspected");
+    for (index, event) in events.iter_mut().enumerate() {
+        event["sequence"] = serde_json::json!(index + 1);
+    }
+    fs::write(&state_path, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+
+    let migrated = DevelopmentState::load(&state_path).unwrap();
+
+    assert_eq!(
+        migrated.worktree_snapshot().unwrap().changed_files,
+        Vec::<String>::new()
+    );
+    assert!(matches!(
+        migrated.events().last().unwrap().event,
+        DevelopmentEventKind::WorktreeInspected { .. }
+    ));
 }
 
 #[test]
