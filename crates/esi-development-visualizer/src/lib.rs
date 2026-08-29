@@ -271,8 +271,9 @@ fn fingerprint_views(state: &DevelopmentState) -> Vec<FingerprintView> {
     for run in state.validation_runs() {
         for evidence in &run.evidence {
             if let Some(fingerprint) = &evidence.failure_fingerprint {
-                details.entry(fingerprint.as_str()).or_insert_with(|| {
-                    FingerprintDetails {
+                details
+                    .entry(fingerprint.as_str())
+                    .or_insert_with(|| FingerprintDetails {
                         category: Some(validation_category_name(evidence.category).to_string()),
                         source_id: Some(evidence.validator_id.clone()),
                         summary: Some(if evidence.stderr.is_empty() {
@@ -280,8 +281,7 @@ fn fingerprint_views(state: &DevelopmentState) -> Vec<FingerprintView> {
                         } else {
                             evidence.stderr.clone()
                         }),
-                    }
-                });
+                    });
             }
         }
     }

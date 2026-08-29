@@ -13,8 +13,8 @@ let cfg = {
     'src/bin',
     'src/images',
     'src/app-update.yml',
-    { from: '../../init-config.yaml', to: 'init-config.yaml' },
-    { from: '../../provider-profiles', to: 'provider-profiles' },
+    '../../init-config.yaml',
+    '../../provider-profiles',
   ],
   icon: 'src/images/esi-icon',
   // Windows specific configuration

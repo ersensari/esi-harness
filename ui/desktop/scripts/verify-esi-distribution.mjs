@@ -35,8 +35,8 @@ for (const expected of [
   "name: 'ESI-Studio'",
   "executableName: 'esi-studio'",
   "appBundleId: 'ai.esi.studio'",
-  "{ from: '../../init-config.yaml', to: 'init-config.yaml' }",
-  "{ from: '../../provider-profiles', to: 'provider-profiles' }",
+  "'../../init-config.yaml'",
+  "'../../provider-profiles'",
   "owner: process.env.GITHUB_OWNER || 'ersensari'",
   "name: process.env.GITHUB_REPO || 'esi-harness'",
 ]) {
