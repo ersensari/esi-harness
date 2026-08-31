@@ -10,19 +10,28 @@ use esi_development_visualizer::{
 use esi_workspace::{
     LifecycleState, SessionId, WorktreeIdentity, WorktreeInspection, WorktreeRecord,
 };
+use esi_workspace_plan::{
+    InnovationDiscovery, PlannedTask, PlannedTaskStatus, Priority, Requirement, WorkspacePlan,
+};
 use rmcp::handler::server::wrapper::Parameters;
+use std::fs;
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
+fn source_path(worktree: &Path) -> PathBuf {
+    worktree.join("source")
+}
+
 fn inspection(worktree: &Path) -> WorktreeInspection {
+    let source = source_path(worktree);
     WorktreeInspection {
         record: WorktreeRecord {
             identity: WorktreeIdentity {
                 schema_version: 1,
                 session_id: SessionId::new("session-visualizer").unwrap(),
                 repository_id: "repository-visualizer".to_string(),
-                source_repository: PathBuf::from("/source"),
-                main_worktree: PathBuf::from("/source"),
+                source_repository: source.clone(),
+                main_worktree: source,
                 worktree_path: worktree.to_path_buf(),
                 branch: "esi/session-visualizer".to_string(),
                 base_commit: "base".to_string(),
@@ -39,6 +48,39 @@ fn inspection(worktree: &Path) -> WorktreeInspection {
 }
 
 fn state_with_validator(worktree: &Path, program: &str, policy: RepairPolicy) -> DevelopmentState {
+    let source = source_path(worktree);
+    fs::create_dir_all(&source).unwrap();
+    let mut workspace_plan = WorkspacePlan::new(&source, "Visualizer fixture").unwrap();
+    workspace_plan
+        .set_requirements(vec![Requirement {
+            id: "REQ-001".to_string(),
+            description: "Show the workspace plan".to_string(),
+            acceptance_criteria: vec!["Plan status is visible".to_string()],
+            priority: Priority::Must,
+        }])
+        .unwrap();
+    workspace_plan
+        .set_innovation_discovery(InnovationDiscovery {
+            brief: "Compare plan visualization approaches".to_string(),
+            research_findings: vec!["Use the controller-bound source workspace".to_string()],
+            candidates: vec!["Inline panel".to_string()],
+            selected_rationale: "Keeps workflow evidence together".to_string(),
+        })
+        .unwrap();
+    workspace_plan
+        .set_plan_content(
+            "Render the plan beside controller evidence",
+            "Read-only projection",
+            vec![PlannedTask {
+                id: "TASK-001".to_string(),
+                title: "Render plan".to_string(),
+                description: "Add a workspace plan panel".to_string(),
+                status: PlannedTaskStatus::Active,
+            }],
+        )
+        .unwrap();
+    workspace_plan.approve("planner@example.com").unwrap();
+    workspace_plan.save(source).unwrap();
     let inspection = inspection(worktree);
     let mut state = DevelopmentState::new("run-visualizer", policy).unwrap();
     state
@@ -82,6 +124,7 @@ fn view_schema_exposes_every_read_only_section() {
     for field in [
         "status",
         "current_stage",
+        "workspace_plan",
         "stage_history",
         "worktree",
         "validation_evidence",
@@ -92,6 +135,22 @@ fn view_schema_exposes_every_read_only_section() {
     ] {
         assert!(schema.contains(field), "schema missing {field}");
     }
+}
+
+#[test]
+fn projection_shows_workspace_plan_and_innovation_approval() {
+    let temp = TempDir::new().unwrap();
+    let state = state_with_validator(temp.path(), "/bin/true", RepairPolicy::default());
+
+    let plan = DevelopmentLoopView::from_state(&state).workspace_plan;
+
+    assert!(plan.exists);
+    assert_eq!(plan.status, "approved");
+    assert!(plan.implementation_allowed);
+    assert_eq!(plan.requirements.len(), 1);
+    assert_eq!(plan.tasks.len(), 1);
+    assert_eq!(plan.innovation.unwrap().candidates, ["Inline panel"]);
+    assert_eq!(plan.approval.unwrap().approved_by, "planner@example.com");
 }
 
 #[test]
@@ -202,6 +261,7 @@ fn html_is_self_contained_and_renders_required_content_regions() {
     let html = app_html();
     for content in [
         "Stage history",
+        "Workspace plan",
         "Worktree",
         "Changed files",
         "Validation evidence",

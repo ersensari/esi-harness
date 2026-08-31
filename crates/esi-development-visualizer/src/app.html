@@ -96,6 +96,7 @@
     </header>
     <div id="stage-history" class="stage-strip" aria-label="Stage history"></div>
     <div class="grid">
+      <section class="wide" id="workspace-plan-panel"><h2>Workspace plan <span id="workspace-plan-status" class="count">missing</span></h2><div id="workspace-plan" class="empty">No workspace plan loaded.</div></section>
       <section id="worktree-panel"><h2>Worktree</h2><div id="worktree" class="empty">No worktree bound.</div></section>
       <section id="repair-panel"><h2>Repair budgets <span id="repair-count" class="count">0</span></h2><ul id="repair-budgets"></ul></section>
       <section class="wide" id="changed-files-panel"><h2>Changed files <span id="file-count" class="count">0</span></h2><ul id="changed-files" class="files"></ul></section>
@@ -122,6 +123,28 @@
         byId("status").textContent = data.status;
         byId("status").dataset.state = data.status;
         renderList("stage-history", data.stage_history || [], (item) => text("span", item.stage.replaceAll("_", " "), "stage"), "No stage history.");
+
+        const plan = data.workspace_plan || { status: "missing", message: "No workspace plan exists.", requirements: [], tasks: [] };
+        byId("workspace-plan-status").textContent = plan.status;
+        const planPanel = byId("workspace-plan");
+        planPanel.replaceChildren();
+        planPanel.className = "";
+        const summary = text("div", plan.message || "", `row ${plan.implementation_allowed ? "completed" : "pending"}`);
+        if (plan.title) summary.prepend(text("div", plan.title, "row-head"));
+        if (plan.description) summary.append(text("div", plan.description, "detail"));
+        if (plan.approval) summary.append(text("div", `Approved by ${plan.approval.approved_by} at ${plan.approval.approved_at}`, "row-meta"));
+        planPanel.append(summary);
+        if (plan.innovation) planPanel.append(row("Innovation discovery", "", `${plan.innovation.candidates.length} candidate(s) · ${plan.innovation.research_findings.length} finding(s)`, [plan.innovation.brief, plan.innovation.selected_rationale].filter(Boolean).join("\n")));
+        if (plan.requirements?.length) {
+          const requirements = text("ul", "", "");
+          plan.requirements.forEach((item) => requirements.append(row(`${item.id} · ${item.priority}`, "", item.acceptance_criteria.join(" · "), item.description)));
+          planPanel.append(text("h2", `Requirements (${plan.requirements.length})`), requirements);
+        }
+        if (plan.tasks?.length) {
+          const tasks = text("ul", "", "");
+          plan.tasks.forEach((item) => tasks.append(row(`${item.id} · ${item.title}`, item.status, "", item.description)));
+          planPanel.append(text("h2", `Planned tasks (${plan.tasks.length})`), tasks);
+        }
 
         const worktree = byId("worktree");
         worktree.replaceChildren();

@@ -357,6 +357,8 @@ pub enum DevelopmentError {
     ValidatedSnapshotChanged,
     #[error("workflow state schema or event history is invalid")]
     InvalidPersistedState,
+    #[error("workspace plan gate: {0}")]
+    WorkspacePlanRequired(#[from] esi_workspace_plan::WorkspacePlanError),
     #[error(transparent)]
     Io(#[from] std::io::Error),
     #[error(transparent)]

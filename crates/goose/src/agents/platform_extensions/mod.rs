@@ -11,6 +11,7 @@ pub mod summarize;
 pub mod summon;
 pub mod todo;
 pub mod tom;
+pub mod workspace_plan;
 
 use std::collections::HashMap;
 
@@ -176,6 +177,24 @@ pub static PLATFORM_EXTENSIONS: Lazy<HashMap<&'static str, PlatformExtensionDef>
                 unprefixed_tools: true,
                 hidden: false,
                 client_factory: |ctx| Some(Box::new(developer::DeveloperClient::new(ctx).unwrap())),
+            },
+        );
+
+        map.insert(
+            workspace_plan::EXTENSION_NAME,
+            PlatformExtensionDef {
+                name: workspace_plan::EXTENSION_NAME,
+                display_name: "ESI Workspace Plan",
+                description:
+                    "Create, inspect, revise, and explicitly approve the durable ESI workspace plan",
+                default_enabled: true,
+                unprefixed_tools: false,
+                hidden: false,
+                client_factory: |ctx| {
+                    Some(Box::new(
+                        workspace_plan::WorkspacePlanClient::new(ctx).unwrap(),
+                    ))
+                },
             },
         );
 

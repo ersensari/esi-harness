@@ -140,6 +140,7 @@ goose-providers = { path = "../goose-providers", default-features = false }
 goose-download-manager = { path = "../goose-download-manager" }
 goose-sdk-types = { path = "../goose-sdk-types" }
 goose-agent = { path = "../goose-agent" }
+esi-workspace-plan = { path = "../esi-workspace-plan" }
 rand = { workspace = true }
 tokio-cron-scheduler = { version = "0.15", default-features = false }
 urlencoding = { workspace = true }

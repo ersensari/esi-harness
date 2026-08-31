@@ -1,21 +1,18 @@
 [package]
-name = "esi-development"
+name = "esi-workspace-plan"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Local deterministic software-development workflow for ESI-Studio"
+description = "Workspace-level SDLC planning gate for ESI-Studio"
 
 [dependencies]
-esi-workspace = { path = "../esi-workspace" }
-esi-workspace-plan = { path = "../esi-workspace-plan" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-esi-workspace-plan = { path = "../esi-workspace-plan" }
 tempfile = { workspace = true }
 
 [lints]

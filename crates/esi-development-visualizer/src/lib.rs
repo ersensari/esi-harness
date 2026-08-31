@@ -2,6 +2,7 @@ use esi_development::{
     DevelopmentEventKind, DevelopmentStage, DevelopmentState, FailureCategory, HumanGateReason,
     ValidationOutcome,
 };
+use esi_workspace_plan::{PlannedTaskStatus, Priority, WorkspacePlan, WorkspacePlanStatus};
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
@@ -99,11 +100,57 @@ pub struct EventView {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct WorkspaceRequirementView {
+    pub id: String,
+    pub description: String,
+    pub acceptance_criteria: Vec<String>,
+    pub priority: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct WorkspaceTaskView {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+    pub status: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct WorkspaceInnovationView {
+    pub brief: String,
+    pub research_findings: Vec<String>,
+    pub candidates: Vec<String>,
+    pub selected_rationale: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct WorkspacePlanApprovalView {
+    pub approved_by: String,
+    pub approved_at: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct WorkspacePlanView {
+    pub exists: bool,
+    pub status: String,
+    pub message: String,
+    pub title: Option<String>,
+    pub description: Option<String>,
+    pub requirements: Vec<WorkspaceRequirementView>,
+    pub tasks: Vec<WorkspaceTaskView>,
+    pub innovation: Option<WorkspaceInnovationView>,
+    pub approval: Option<WorkspacePlanApprovalView>,
+    pub implementation_allowed: bool,
+    pub revision_count: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct DevelopmentLoopView {
     pub status: VisualizerStatus,
     pub run_id: Option<String>,
     pub objective: Option<String>,
     pub current_stage: Option<String>,
+    pub workspace_plan: WorkspacePlanView,
     pub stage_history: Vec<StageHistoryItem>,
     pub worktree: Option<WorktreeView>,
     pub validation_evidence: Vec<ValidationEvidenceView>,
@@ -127,6 +174,7 @@ impl DevelopmentLoopView {
             run_id: None,
             objective: None,
             current_stage: None,
+            workspace_plan: WorkspacePlanView::missing(),
             stage_history: Vec::new(),
             worktree: None,
             validation_evidence: Vec::new(),
@@ -168,6 +216,7 @@ impl DevelopmentLoopView {
                 _ => None,
             })
             .collect();
+        let workspace_plan = workspace_plan_view(state);
         let worktree = state.worktree().and_then(|binding| {
             state.worktree_snapshot().map(|snapshot| WorktreeView {
                 repository_id: binding.identity.repository_id.clone(),
@@ -255,6 +304,7 @@ impl DevelopmentLoopView {
             run_id: Some(state.run_id().to_string()),
             objective: state.brief().map(|brief| brief.objective.clone()),
             current_stage: Some(stage_name(state.stage()).to_string()),
+            workspace_plan,
             stage_history,
             worktree,
             validation_evidence,
@@ -263,6 +313,116 @@ impl DevelopmentLoopView {
             approvals,
             events,
         }
+    }
+}
+
+impl WorkspacePlanView {
+    fn missing() -> Self {
+        Self {
+            exists: false,
+            status: "missing".to_string(),
+            message:
+                "No workspace plan exists. Complete discovery and approve a plan before building."
+                    .to_string(),
+            title: None,
+            description: None,
+            requirements: Vec::new(),
+            tasks: Vec::new(),
+            innovation: None,
+            approval: None,
+            implementation_allowed: false,
+            revision_count: 0,
+        }
+    }
+
+    fn invalid(error: &esi_workspace_plan::WorkspacePlanError) -> Self {
+        Self {
+            status: "invalid".to_string(),
+            message: format!("Workspace plan cannot be loaded: {error}"),
+            ..Self::missing()
+        }
+    }
+
+    fn from_plan(plan: &WorkspacePlan) -> Self {
+        Self {
+            exists: true,
+            status: workspace_plan_status_name(plan.status()).to_string(),
+            message: plan.status().display_message().to_string(),
+            title: Some(plan.title().to_string()),
+            description: Some(plan.description().to_string()),
+            requirements: plan
+                .requirements()
+                .iter()
+                .map(|requirement| WorkspaceRequirementView {
+                    id: requirement.id.clone(),
+                    description: requirement.description.clone(),
+                    acceptance_criteria: requirement.acceptance_criteria.clone(),
+                    priority: priority_name(requirement.priority).to_string(),
+                })
+                .collect(),
+            tasks: plan
+                .tasks()
+                .iter()
+                .map(|task| WorkspaceTaskView {
+                    id: task.id.clone(),
+                    title: task.title.clone(),
+                    description: task.description.clone(),
+                    status: planned_task_status_name(task.status).to_string(),
+                })
+                .collect(),
+            innovation: plan
+                .innovation_discovery()
+                .map(|innovation| WorkspaceInnovationView {
+                    brief: innovation.brief.clone(),
+                    research_findings: innovation.research_findings.clone(),
+                    candidates: innovation.candidates.clone(),
+                    selected_rationale: innovation.selected_rationale.clone(),
+                }),
+            approval: plan.approval().map(|approval| WorkspacePlanApprovalView {
+                approved_by: approval.approved_by.clone(),
+                approved_at: approval.approved_at.clone(),
+            }),
+            implementation_allowed: plan.is_implementation_allowed(),
+            revision_count: plan.revision_count(),
+        }
+    }
+}
+
+fn workspace_plan_view(state: &DevelopmentState) -> WorkspacePlanView {
+    let Some(worktree) = state.worktree() else {
+        return WorkspacePlanView::missing();
+    };
+    match WorkspacePlan::load(&worktree.identity.source_repository) {
+        Ok(Some(plan)) => WorkspacePlanView::from_plan(&plan),
+        Ok(None) => WorkspacePlanView::missing(),
+        Err(error) => WorkspacePlanView::invalid(&error),
+    }
+}
+
+fn workspace_plan_status_name(status: WorkspacePlanStatus) -> &'static str {
+    match status {
+        WorkspacePlanStatus::Discovery => "discovery",
+        WorkspacePlanStatus::Planning => "planning",
+        WorkspacePlanStatus::Approved => "approved",
+        WorkspacePlanStatus::Revising => "revising",
+    }
+}
+
+fn priority_name(priority: Priority) -> &'static str {
+    match priority {
+        Priority::Must => "must",
+        Priority::Should => "should",
+        Priority::Could => "could",
+        Priority::Wont => "wont",
+    }
+}
+
+fn planned_task_status_name(status: PlannedTaskStatus) -> &'static str {
+    match status {
+        PlannedTaskStatus::Pending => "pending",
+        PlannedTaskStatus::Active => "active",
+        PlannedTaskStatus::Completed => "completed",
+        PlannedTaskStatus::Skipped => "skipped",
     }
 }
 

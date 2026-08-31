@@ -21,6 +21,7 @@ use crate::tool_inspection::{
 use tokio::sync::Mutex;
 
 pub const TOOL_EXECUTABLE_KEY: &str = "goose.executable";
+pub const TOOL_DENIAL_REASON_KEY: &str = "goose.denial_reason";
 
 pub struct ToolApprovalOperation<'a> {
     goose_mode: &'a Mutex<GooseMode>,
@@ -76,7 +77,7 @@ impl Operation<Session, GooseEffect> for ToolApprovalOperation<'_> {
             }
 
             if pending.executable != Some(executable) {
-                effects.push(mark_executable(&pending.tool_call_id, executable));
+                effects.push(mark_executable(&pending.tool_call_id, executable, None));
             }
         }
 
@@ -106,12 +107,20 @@ impl Operation<Session, GooseEffect> for ToolApprovalOperation<'_> {
                 );
 
             for request in permission_check_result.denied {
-                effects.push(mark_executable(&request.id, false));
+                let reason = inspection_results
+                    .iter()
+                    .find(|result| {
+                        result.tool_request_id == request.id
+                            && result.action == InspectionAction::Deny
+                            && result.inspector_name == "workspace_plan"
+                    })
+                    .map(|result| result.reason.as_str());
+                effects.push(mark_executable(&request.id, false, reason));
             }
 
             for request in permission_check_result.needs_approval {
                 let tool_call = request.tool_call.clone()?;
-                effects.push(mark_executable(&request.id, false));
+                effects.push(mark_executable(&request.id, false, None));
 
                 let security_message = inspection_results
                     .iter()
@@ -255,14 +264,30 @@ pub fn request_executable(request: &ToolRequest) -> Option<bool> {
         .and_then(|value| value.as_bool())
 }
 
+pub fn request_denial_reason(request: &ToolRequest) -> Option<&str> {
+    request
+        .tool_meta
+        .as_ref()
+        .and_then(|meta| meta.get(TOOL_DENIAL_REASON_KEY))
+        .and_then(|value| value.as_str())
+}
+
 fn permission_allows(permission: &Permission) -> bool {
     matches!(permission, Permission::AllowOnce | Permission::AlwaysAllow)
 }
 
-fn mark_executable(tool_call_id: &str, executable: bool) -> GooseEffect {
+fn mark_executable(
+    tool_call_id: &str,
+    executable: bool,
+    denial_reason: Option<&str>,
+) -> GooseEffect {
+    let mut patch = serde_json::json!({ TOOL_EXECUTABLE_KEY: executable });
+    if let Some(reason) = denial_reason {
+        patch[TOOL_DENIAL_REASON_KEY] = serde_json::Value::String(reason.to_string());
+    }
     ConversationEffect::PatchToolRequestMeta {
         tool_call_id: tool_call_id.to_string(),
-        patch: serde_json::json!({ TOOL_EXECUTABLE_KEY: executable }),
+        patch,
     }
     .into()
 }

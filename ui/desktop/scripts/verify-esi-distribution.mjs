@@ -14,12 +14,29 @@ assert.equal(packageJson.productName, 'ESI-Studio');
 const extensions = JSON.parse(
   read('src', 'components', 'settings', 'extensions', 'bundled-extensions.json')
 );
-for (const id of ['esi-wiki', 'esi-innovation', 'forgeloop']) {
+for (const id of ['esi-wiki', 'forgeloop']) {
   const extension = extensions.find((candidate) => candidate.id === id);
   assert.ok(extension, `missing ${id} extension placeholder`);
   assert.equal(extension.enabled, false, `${id} must be disabled by default`);
   assert.equal(extension.bundled, true, `${id} must be managed by the distribution`);
 }
+assert.ok(
+  !extensions.some((candidate) => candidate.id === 'esi-innovation'),
+  'unimplemented ESI-Innovation must not be offered as an extension'
+);
+const deprecatedExtensions = JSON.parse(
+  read(
+    'src',
+    'components',
+    'settings',
+    'extensions',
+    'deprecated-bundled-extensions.json'
+  )
+);
+assert.ok(
+  deprecatedExtensions.some((candidate) => candidate.id === 'esi-innovation'),
+  'existing bundled ESI-Innovation entries must be pruned'
+);
 const developmentVisualizer = extensions.find(
   (candidate) => candidate.id === 'esi-development-visualizer'
 );
@@ -32,10 +49,16 @@ assert.match(forgeLoop.description, /operator-only/i);
 const wiki = extensions.find((candidate) => candidate.id === 'esi-wiki');
 assert.equal(wiki.type, 'streamable_http');
 assert.equal(wiki.uri, '', 'ESI-Wiki endpoint must be supplied by the user');
-assert.deepEqual(wiki.env_keys, []);
+assert.deepEqual(wiki.env_keys, ['ESI_WIKI_AUTHORIZATION']);
 assert.match(wiki.description, /authenticated/i);
 assert.match(wiki.description, /configure/i);
-assert.ok(!('headers' in wiki), 'ESI-Wiki must not bundle authorization headers');
+assert.deepEqual(wiki.headers, {
+  Authorization: '${ESI_WIKI_AUTHORIZATION}',
+});
+assert.ok(
+  !JSON.stringify(wiki).includes('Bearer '),
+  'ESI-Wiki must not bundle authorization credentials'
+);
 assert.ok(!('client_id' in wiki), 'ESI-Wiki must not bundle an OAuth client identity');
 assert.ok(!('client_secret_key' in wiki), 'ESI-Wiki must not bundle a client secret reference');
 

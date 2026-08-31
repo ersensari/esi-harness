@@ -67,7 +67,9 @@ use crate::security::egress_inspector::EgressInspector;
 use crate::security::security_inspector::SecurityInspector;
 use crate::session::extension_data::{EnabledExtensionsState, ExtensionState};
 use crate::session::{Session, SessionManager, SessionNameUpdate};
-use crate::tool_inspection::ToolInspectionManager;
+use crate::tool_inspection::{
+    categorize_tool, extract_string_arg, ToolCategory, ToolInspectionManager,
+};
 use crate::tool_monitor::RepetitionInspector;
 use crate::utils::is_token_cancelled;
 use goose_providers::conversation::token_usage::{ProviderUsage, Usage};
@@ -117,36 +119,6 @@ fn normalize_legacy_provider_thinking_effort(
         params.remove("thinking_effort");
     }
     model_config.with_default_thinking_effort(Config::global().get_goose_thinking_effort())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ToolCategory {
-    Shell,
-    Read,
-    Write,
-    Other,
-}
-
-fn categorize_tool(tool_name: &str) -> ToolCategory {
-    let local = tool_name.rsplit("__").next().unwrap_or(tool_name);
-    match local {
-        "shell" | "bash" | "exec" | "run" => ToolCategory::Shell,
-        "read" | "view" | "cat" | "read_file" => ToolCategory::Read,
-        "write" | "edit" | "patch" | "write_file" | "edit_file" => ToolCategory::Write,
-        _ => ToolCategory::Other,
-    }
-}
-
-fn extract_string_arg(input: &Value, keys: &[&str]) -> Option<String> {
-    let obj = input.as_object()?;
-    for k in keys {
-        if let Some(s) = obj.get(*k).and_then(|v| v.as_str()) {
-            if !s.is_empty() {
-                return Some(s.to_string());
-            }
-        }
-    }
-    None
 }
 
 pub(crate) fn stop_hook_denial_context_message(plugin: &str, reason: &str) -> Message {
@@ -435,6 +407,7 @@ impl Agent {
         let permission_manager = Arc::clone(&config.permission_manager);
         let use_login_shell_path = config.resolve_use_login_shell_path();
         let is_subagent = config.is_subagent;
+        let enforce_workspace_plans = matches!(config.goose_platform, GoosePlatform::GooseDesktop);
         Self {
             provider: provider.clone(),
             config,
@@ -460,6 +433,7 @@ impl Agent {
                 permission_manager,
                 provider.clone(),
                 inspection_session_manager,
+                enforce_workspace_plans,
             ),
             hook_manager: if is_subagent {
                 crate::hooks::HookManager::default()
@@ -779,8 +753,15 @@ impl Agent {
         permission_manager: Arc<PermissionManager>,
         provider: SharedProvider,
         session_manager: Arc<SessionManager>,
+        enforce_workspace_plans: bool,
     ) -> ToolInspectionManager {
         let mut tool_inspection_manager = ToolInspectionManager::new();
+
+        if enforce_workspace_plans {
+            tool_inspection_manager.add_inspector(Box::new(
+                crate::workspace_plan_gate::WorkspacePlanInspector::new(session_manager.clone()),
+            ));
+        }
 
         // Add security inspector (highest priority - runs first)
         tool_inspection_manager.add_inspector(Box::new(SecurityInspector::new()));
@@ -928,6 +909,7 @@ impl Agent {
         request_to_response_map: &mut HashMap<String, Message>,
         cancel_token: Option<tokio_util::sync::CancellationToken>,
         session: &Session,
+        inspection_results: &[crate::tool_inspection::InspectionResult],
     ) -> Result<Vec<(String, ToolStream)>> {
         let mut tool_futures: Vec<(String, ToolStream)> = Vec::new();
 
@@ -965,20 +947,34 @@ impl Agent {
             }
         }
 
-        Self::handle_denied_tools(permission_check_result, request_to_response_map);
+        Self::handle_denied_tools(
+            permission_check_result,
+            request_to_response_map,
+            inspection_results,
+        );
         Ok(tool_futures)
     }
 
     fn handle_denied_tools(
         permission_check_result: &PermissionCheckResult,
         request_to_response_map: &mut HashMap<String, Message>,
+        inspection_results: &[crate::tool_inspection::InspectionResult],
     ) {
         for request in &permission_check_result.denied {
             if let Some(response) = request_to_response_map.get_mut(&request.id) {
+                let reason = inspection_results
+                    .iter()
+                    .find(|result| {
+                        result.tool_request_id == request.id
+                            && result.action == crate::tool_inspection::InspectionAction::Deny
+                            && result.inspector_name == "workspace_plan"
+                    })
+                    .map(|result| result.reason.as_str())
+                    .unwrap_or(DECLINED_RESPONSE);
                 response.add_tool_response_with_metadata(
                     request.id.clone(),
                     Ok(CallToolResult::error(vec![
-                        rmcp::model::ContentBlock::text(DECLINED_RESPONSE),
+                        rmcp::model::ContentBlock::text(reason),
                     ])),
                     request.metadata.as_ref(),
                 );
@@ -2770,6 +2766,7 @@ impl Agent {
                                         &mut request_to_response_map,
                                         cancel_token.clone(),
                                         &session,
+                                        &inspection_results,
                                     ).await?;
 
                                     {
@@ -5585,6 +5582,27 @@ echo start >> "$PLUGIN_ROOT/hook.log"
         assert!(
             inspector_names.contains(&"adversary"),
             "Tool inspection manager should contain adversary inspector"
+        );
+        assert!(
+            !inspector_names.contains(&"workspace_plan"),
+            "CLI agents should not enforce the ESI Desktop workspace-plan policy"
+        );
+
+        let data_dir = TempDir::new()?;
+        let desktop_agent = Agent::with_config(AgentConfig::new(
+            Arc::new(SessionManager::new(data_dir.path().to_path_buf())),
+            Arc::new(PermissionManager::new(data_dir.path().to_path_buf())),
+            None,
+            GooseMode::SmartApprove,
+            true,
+            GoosePlatform::GooseDesktop,
+        ));
+        assert!(
+            desktop_agent
+                .tool_inspection_manager
+                .inspector_names()
+                .contains(&"workspace_plan"),
+            "Desktop agents must contain the workspace-plan inspector"
         );
 
         Ok(())

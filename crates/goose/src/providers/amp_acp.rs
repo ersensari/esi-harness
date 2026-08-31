@@ -80,7 +80,7 @@ impl ProviderDef for AmpAcpProvider {
                 env: vec![],
                 env_remove: vec![],
                 work_dir: working_dir,
-                mcp_servers: extension_configs_to_mcp_servers(&extensions),
+                mcp_servers: extension_configs_to_mcp_servers(&extensions).await?,
                 session_mode_id: mode_mapping[&goose_mode].first().cloned(),
                 session_config_options: vec![],
                 model_config_option_id: None,

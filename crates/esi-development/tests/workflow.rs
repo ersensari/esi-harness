@@ -477,3 +477,193 @@ fn validation_plan_rejects_out_of_order_categories() {
         Err(DevelopmentError::InvalidValidationPlan(_))
     ));
 }
+
+// ---------------------------------------------------------------------------
+// Workspace plan gate integration tests (ADR-0010)
+// ---------------------------------------------------------------------------
+
+fn source_with_approved_plan() -> TempDir {
+    let source_dir = TempDir::new().unwrap();
+    let mut plan =
+        esi_workspace_plan::WorkspacePlan::new(source_dir.path(), "Test Project").unwrap();
+    plan.set_requirements(vec![esi_workspace_plan::Requirement {
+        id: "REQ-001".to_string(),
+        description: "Test requirement".to_string(),
+        acceptance_criteria: vec!["It works".to_string()],
+        priority: esi_workspace_plan::Priority::Must,
+    }])
+    .unwrap();
+    plan.set_plan_content("Test plan", "Test architecture", vec![])
+        .unwrap();
+    plan.approve("test@example.com").unwrap();
+    plan.save(source_dir.path()).unwrap();
+    source_dir
+}
+
+fn inspection_with_source(source: &Path, worktree: &Path, snapshot_id: &str) -> WorktreeInspection {
+    WorktreeInspection {
+        record: WorktreeRecord {
+            identity: WorktreeIdentity {
+                schema_version: 1,
+                session_id: SessionId::new("session-plan").unwrap(),
+                repository_id: "repository-plan".to_string(),
+                source_repository: source.to_path_buf(),
+                main_worktree: source.to_path_buf(),
+                worktree_path: worktree.to_path_buf(),
+                branch: "esi/session-plan".to_string(),
+                base_commit: "base".to_string(),
+                main_head_at_creation: "base".to_string(),
+                main_was_dirty: false,
+            },
+            state: LifecycleState::Ready,
+        },
+        head: "base".to_string(),
+        dirty: false,
+        changed_files: Vec::new(),
+        snapshot_id: snapshot_id.to_string(),
+    }
+}
+
+#[test]
+fn workspace_plan_gate_blocks_approve_worktree_without_plan() {
+    let source_dir = TempDir::new().unwrap();
+    let worktree_dir = TempDir::new().unwrap();
+    let inspection = inspection_with_source(source_dir.path(), worktree_dir.path(), "snap-1");
+
+    let mut state = DevelopmentState::new("run-plan-1", RepairPolicy::default()).unwrap();
+    state
+        .record_brief(Brief {
+            objective: "Test implementation".to_string(),
+            acceptance_criteria: vec!["Gate enforced".to_string()],
+        })
+        .unwrap();
+    state
+        .record_plan(ImplementationPlan {
+            summary: "Implement and validate".to_string(),
+            validation: ValidationPlan::new(vec![command(
+                "check",
+                ValidationCategory::Syntax,
+                "/bin/true",
+                &[],
+            )])
+            .unwrap(),
+        })
+        .unwrap();
+
+    let result = state.approve_worktree(
+        &inspection,
+        WorktreeReadyApproval {
+            run_id: "run-plan-1".to_string(),
+            repository_id: "repository-plan".to_string(),
+            worktree_path: worktree_dir.path().to_path_buf(),
+            snapshot_id: "snap-1".to_string(),
+            approved_by: "human@example.com".to_string(),
+        },
+    );
+
+    assert!(
+        result.is_err(),
+        "approve_worktree should fail without workspace plan"
+    );
+    let err_msg = result.unwrap_err().to_string();
+    assert!(
+        err_msg.contains("workspace plan") || err_msg.contains("no workspace plan"),
+        "error should mention workspace plan: {err_msg}"
+    );
+}
+
+#[test]
+fn workspace_plan_gate_allows_approve_worktree_with_approved_plan() {
+    let source_dir = source_with_approved_plan();
+    let worktree_dir = TempDir::new().unwrap();
+    let inspection = inspection_with_source(source_dir.path(), worktree_dir.path(), "snap-2");
+
+    let mut state = DevelopmentState::new("run-plan-2", RepairPolicy::default()).unwrap();
+    state
+        .record_brief(Brief {
+            objective: "Test implementation with plan".to_string(),
+            acceptance_criteria: vec!["Gate passes".to_string()],
+        })
+        .unwrap();
+    state
+        .record_plan(ImplementationPlan {
+            summary: "Implement and validate".to_string(),
+            validation: ValidationPlan::new(vec![command(
+                "check",
+                ValidationCategory::Syntax,
+                "/bin/true",
+                &[],
+            )])
+            .unwrap(),
+        })
+        .unwrap();
+
+    state
+        .approve_worktree(
+            &inspection,
+            WorktreeReadyApproval {
+                run_id: "run-plan-2".to_string(),
+                repository_id: "repository-plan".to_string(),
+                worktree_path: worktree_dir.path().to_path_buf(),
+                snapshot_id: "snap-2".to_string(),
+                approved_by: "human@example.com".to_string(),
+            },
+        )
+        .expect("approve_worktree should succeed with approved workspace plan");
+
+    assert_eq!(state.stage(), DevelopmentStage::WorktreeReady);
+}
+
+#[test]
+fn workspace_plan_gate_blocks_unapproved_plan() {
+    let source_dir = TempDir::new().unwrap();
+    // Create a plan in planning status (not approved)
+    let mut plan = esi_workspace_plan::WorkspacePlan::new(source_dir.path(), "Unapproved").unwrap();
+    plan.set_requirements(vec![esi_workspace_plan::Requirement {
+        id: "REQ-001".to_string(),
+        description: "Some requirement".to_string(),
+        acceptance_criteria: vec!["Criterion".to_string()],
+        priority: esi_workspace_plan::Priority::Must,
+    }])
+    .unwrap();
+    plan.set_plan_content("Plan in progress", "Arch", vec![])
+        .unwrap();
+    // Do NOT approve
+    plan.save(source_dir.path()).unwrap();
+
+    let worktree_dir = TempDir::new().unwrap();
+    let inspection = inspection_with_source(source_dir.path(), worktree_dir.path(), "snap-3");
+
+    let mut state = DevelopmentState::new("run-plan-3", RepairPolicy::default()).unwrap();
+    state
+        .record_brief(Brief {
+            objective: "Test blocked implementation".to_string(),
+            acceptance_criteria: vec!["Gate blocks".to_string()],
+        })
+        .unwrap();
+    state
+        .record_plan(ImplementationPlan {
+            summary: "Implement and validate".to_string(),
+            validation: ValidationPlan::new(vec![command(
+                "check",
+                ValidationCategory::Syntax,
+                "/bin/true",
+                &[],
+            )])
+            .unwrap(),
+        })
+        .unwrap();
+
+    let result = state.approve_worktree(
+        &inspection,
+        WorktreeReadyApproval {
+            run_id: "run-plan-3".to_string(),
+            repository_id: "repository-plan".to_string(),
+            worktree_path: worktree_dir.path().to_path_buf(),
+            snapshot_id: "snap-3".to_string(),
+            approved_by: "human@example.com".to_string(),
+        },
+    );
+
+    assert!(result.is_err(), "should block with unapproved plan");
+}

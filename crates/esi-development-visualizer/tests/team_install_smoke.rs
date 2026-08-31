@@ -8,6 +8,7 @@ use esi_development_visualizer::{
     VisualizerStatus, DEVELOPMENT_LOOP_RESOURCE_URI, MCP_APPS_MIME_TYPE,
 };
 use esi_workspace::{CleanupApproval, LifecycleState, SessionId, WorkspaceManager};
+use esi_workspace_plan::{Priority, Requirement, WorkspacePlan};
 use rmcp::{handler::server::wrapper::Parameters, model::ServerInfo, ServerHandler};
 use serde_json::Value;
 use std::fs;
@@ -192,6 +193,24 @@ async fn clean_team_install_completes_local_workflow_without_private_services() 
     let initial = manager
         .create(&repository, session_id.clone(), "HEAD")
         .unwrap();
+    let mut workspace_plan = WorkspacePlan::new(&repository, "Clean team fixture").unwrap();
+    workspace_plan
+        .set_requirements(vec![Requirement {
+            id: "REQ-001".to_string(),
+            description: "Complete the local deterministic workflow".to_string(),
+            acceptance_criteria: vec!["All required validation passes".to_string()],
+            priority: Priority::Must,
+        }])
+        .unwrap();
+    workspace_plan
+        .set_plan_content(
+            "Implement, validate, review, approve, and clean up locally",
+            "ESI-managed worktree with deterministic validation",
+            Vec::new(),
+        )
+        .unwrap();
+    workspace_plan.approve(APPROVER).unwrap();
+    workspace_plan.save(&repository).unwrap();
     assert_ne!(
         initial.record.identity.main_worktree,
         initial.record.identity.worktree_path

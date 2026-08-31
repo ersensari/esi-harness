@@ -4272,6 +4272,7 @@ name = "esi-development"
 version = "1.48.0"
 dependencies = [
  "esi-workspace",
+ "esi-workspace-plan",
  "serde",
  "serde_json",
  "sha2 0.11.0",
@@ -4285,6 +4286,7 @@ version = "1.48.0"
 dependencies = [
  "esi-development",
  "esi-workspace",
+ "esi-workspace-plan",
  "rmcp 3.1.4",
  "schemars 1.2.2",
  "serde",
@@ -4295,6 +4297,17 @@ dependencies = [
 
 [[package]]
 name = "esi-workspace"
+version = "1.48.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "tempfile",
+ "thiserror 2.0.20",
+]
+
+[[package]]
+name = "esi-workspace-plan"
 version = "1.48.0"
 dependencies = [
  "serde",
@@ -5250,6 +5263,7 @@ dependencies = [
  "dotenvy",
  "dtor",
  "env-lock",
+ "esi-workspace-plan",
  "etcetera",
  "fs-err",
  "fs2",

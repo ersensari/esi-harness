@@ -9,7 +9,7 @@ use rmcp::model::{CallToolRequestParams, CallToolResult, ContentBlock, ErrorData
 
 use crate::agents::extension_manager::ExtensionManager;
 use crate::agents::platform_extensions::MANAGE_EXTENSIONS_TOOL_NAME_COMPLETE;
-use crate::agents::state_machine::ops_tool_approval::request_executable;
+use crate::agents::state_machine::ops_tool_approval::{request_denial_reason, request_executable};
 use crate::agents::state_machine::{
     applied, messages_since_kickoff, not_applicable, yielded_with, ConversationEffect, Emitter,
     GooseEffect, Operation, OperationResult, SlashCommand,
@@ -894,11 +894,10 @@ impl Operation<Session, GooseEffect> for ToolExecutionOperation<'_> {
             match disposition {
                 ToolDisposition::Execute => {}
                 ToolDisposition::Decline => {
+                    let reason = request_denial_reason(request).unwrap_or(DECLINED_RESPONSE);
                     response.add_tool_response_with_metadata(
                         request.id.clone(),
-                        Ok(CallToolResult::error(vec![ContentBlock::text(
-                            DECLINED_RESPONSE,
-                        )])),
+                        Ok(CallToolResult::error(vec![ContentBlock::text(reason)])),
                         request.metadata.as_ref(),
                     );
                 }

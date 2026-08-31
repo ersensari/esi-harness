@@ -73,7 +73,7 @@ impl PiAcpProvider {
                 env: vec![],
                 env_remove: vec![],
                 work_dir: working_dir,
-                mcp_servers: extension_configs_to_mcp_servers(&extensions),
+                mcp_servers: extension_configs_to_mcp_servers(&extensions).await?,
                 session_mode_id: None,
                 session_config_options,
                 model_config_option_id: Some("model".to_string()),

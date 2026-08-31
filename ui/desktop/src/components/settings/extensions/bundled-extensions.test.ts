@@ -25,11 +25,29 @@ vi.mock('./bundled-extensions.json', () => ({
       env_keys: [],
       timeout: 300,
     },
+    {
+      id: 'esi-wiki',
+      name: 'esi-wiki',
+      display_name: 'ESI-Wiki',
+      description: 'Authenticated Wiki.',
+      enabled: false,
+      type: 'streamable_http',
+      uri: '',
+      env_keys: ['ESI_WIKI_AUTHORIZATION'],
+      headers: {
+        Authorization: '${ESI_WIKI_AUTHORIZATION}',
+      },
+      timeout: 300,
+    },
   ],
 }));
 
 vi.mock('./deprecated-bundled-extensions.json', () => ({
-  default: [{ id: 'googledrive' }, { id: 'old-bundled-extension' }],
+  default: [
+    { id: 'googledrive' },
+    { id: 'old-bundled-extension' },
+    { id: 'esi-innovation' },
+  ],
 }));
 
 describe('syncBundledExtensions', () => {
@@ -52,6 +70,26 @@ describe('syncBundledExtensions', () => {
       'developer',
       expect.anything(),
       expect.anything()
+    );
+  });
+
+  it('syncs Wiki authorization as a secret-backed request header', async () => {
+    const addExtensionFn = vi.fn().mockResolvedValue(undefined);
+
+    await syncBundledExtensions([], addExtensionFn);
+
+    expect(addExtensionFn).toHaveBeenCalledWith(
+      'esi-wiki',
+      expect.objectContaining({
+        type: 'streamable_http',
+        uri: '',
+        env_keys: ['ESI_WIKI_AUTHORIZATION'],
+        headers: {
+          Authorization: '${ESI_WIKI_AUTHORIZATION}',
+        },
+        bundled: true,
+      }),
+      false
     );
   });
 });
@@ -97,6 +135,30 @@ describe('pruneDeprecatedBundledExtensions', () => {
 
     expect(removeExtensionFn).not.toHaveBeenCalled();
     expect(remainingExtensions).toEqual(existingExtensions);
+  });
+
+  it('removes the retired bundled ESI-Innovation placeholder', async () => {
+    const removeExtensionFn = vi.fn().mockResolvedValue(undefined);
+    const existingExtensions = [
+      {
+        name: 'esi-innovation',
+        type: 'stdio',
+        description: 'Unimplemented Innovation placeholder',
+        cmd: 'esi-innovation-mcp',
+        args: [],
+        env_keys: [],
+        enabled: false,
+        bundled: true,
+      },
+    ] as FixedExtensionEntry[];
+
+    const remainingExtensions = await pruneDeprecatedBundledExtensions(
+      existingExtensions,
+      removeExtensionFn
+    );
+
+    expect(removeExtensionFn).toHaveBeenCalledWith('esi-innovation');
+    expect(remainingExtensions).toEqual([]);
   });
 
   it('allows same-id bundled extensions to be re-added after prune', async () => {

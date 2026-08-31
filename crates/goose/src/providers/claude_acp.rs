@@ -87,7 +87,7 @@ impl ProviderDef for ClaudeAcpProvider {
                 // Prevent nested-session detection in claude-agent-acp (wraps Claude Code)
                 env_remove: vec!["CLAUDECODE".to_string()],
                 work_dir: working_dir,
-                mcp_servers: extension_configs_to_mcp_servers(&extensions),
+                mcp_servers: extension_configs_to_mcp_servers(&extensions).await?,
                 session_mode_id: mode_mapping[&goose_mode].first().cloned(),
                 session_config_options: vec![],
                 // claude-agent-acp advertises the model as a "model" select

@@ -7,6 +7,43 @@ use crate::conversation::message::{Message, ToolRequest};
 use crate::permission::permission_inspector::PermissionInspector;
 use crate::permission::permission_judge::PermissionCheckResult;
 
+/// Coarse category of a tool call, derived from its unprefixed name.
+///
+/// Shared by enforcement inspectors (workspace plan gate, extended lifecycle
+/// hooks) that need to reason about shell/file-write risk without depending
+/// on any specific extension's tool-naming scheme. Extension tool names may
+/// be prefixed with `<extension>__` (see `PlatformExtensionDef::unprefixed_tools`);
+/// only the final segment is matched.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ToolCategory {
+    Shell,
+    Read,
+    Write,
+    Other,
+}
+
+pub(crate) fn categorize_tool(tool_name: &str) -> ToolCategory {
+    let local = tool_name.rsplit("__").next().unwrap_or(tool_name);
+    match local {
+        "shell" | "bash" | "exec" | "run" => ToolCategory::Shell,
+        "read" | "view" | "cat" | "read_file" => ToolCategory::Read,
+        "write" | "edit" | "patch" | "write_file" | "edit_file" => ToolCategory::Write,
+        _ => ToolCategory::Other,
+    }
+}
+
+pub(crate) fn extract_string_arg(input: &serde_json::Value, keys: &[&str]) -> Option<String> {
+    let obj = input.as_object()?;
+    for k in keys {
+        if let Some(s) = obj.get(*k).and_then(|v| v.as_str()) {
+            if !s.is_empty() {
+                return Some(s.to_string());
+            }
+        }
+    }
+    None
+}
+
 /// Result of inspecting a tool call
 #[derive(Debug, Clone)]
 pub struct InspectionResult {

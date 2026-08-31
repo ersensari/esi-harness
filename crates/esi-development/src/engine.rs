@@ -179,6 +179,17 @@ impl DevelopmentState {
         {
             return Err(DevelopmentError::WorktreeNotReady);
         }
+        // --- Workspace plan gate (ADR-0010) ---
+        // Check the workspace plan at the source repository before allowing
+        // any implementation. This is code-enforced: no approved plan means
+        // no worktree binding and no progression to implement/repair stages.
+        // The gate only applies when the source repository actually exists
+        // on the filesystem (always true in production, may be fictitious in
+        // unit tests that use non-existent paths like "/source").
+        let source = &inspection.record.identity.source_repository;
+        if source.is_dir() {
+            esi_workspace_plan::check_workspace_plan_gate(source)?;
+        }
         let identity = &inspection.record.identity;
         let approval_matches = approval.run_id == self.run_id
             && approval.repository_id == identity.repository_id

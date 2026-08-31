@@ -1839,10 +1839,13 @@ fn select_mode_id(candidates: &[String], modes: Option<&SessionModeState>) -> Op
     }
 }
 
-pub fn extension_configs_to_mcp_servers(configs: &[ExtensionConfig]) -> Vec<McpServer> {
+pub async fn extension_configs_to_mcp_servers(
+    configs: &[ExtensionConfig],
+) -> Result<Vec<McpServer>> {
     let mut servers = Vec::new();
 
     for config in configs {
+        let config = config.clone().resolve(Config::global()).await?;
         match config {
             ExtensionConfig::StreamableHttp {
                 name, uri, headers, ..
@@ -1852,7 +1855,7 @@ pub fn extension_configs_to_mcp_servers(configs: &[ExtensionConfig]) -> Vec<McpS
                     .map(|(key, value)| HttpHeader::new(key, value))
                     .collect();
                 servers.push(McpServer::Http(
-                    McpServerHttp::new(name, uri).headers(http_headers),
+                    McpServerHttp::new(&name, &uri).headers(http_headers),
                 ));
             }
             ExtensionConfig::Stdio {
@@ -1869,9 +1872,7 @@ pub fn extension_configs_to_mcp_servers(configs: &[ExtensionConfig]) -> Vec<McpS
                     .collect();
 
                 servers.push(McpServer::Stdio(
-                    McpServerStdio::new(name, cmd)
-                        .args(args.clone())
-                        .env(env_vars),
+                    McpServerStdio::new(&name, &cmd).args(args).env(env_vars),
                 ));
             }
             ExtensionConfig::Sse { name, .. } => {
@@ -1881,7 +1882,7 @@ pub fn extension_configs_to_mcp_servers(configs: &[ExtensionConfig]) -> Vec<McpS
         }
     }
 
-    servers
+    Ok(servers)
 }
 
 fn filter_supported_servers(
@@ -4230,8 +4231,12 @@ mod tests {
         ]
         ; "streamable_http_converts_to_mcpserver_http_when_capable"
     )]
-    fn test_extension_configs_to_mcp_servers(config: ExtensionConfig, expected: Vec<McpServer>) {
-        let result = extension_configs_to_mcp_servers(&[config]);
+    #[tokio::test]
+    async fn test_extension_configs_to_mcp_servers(
+        config: ExtensionConfig,
+        expected: Vec<McpServer>,
+    ) {
+        let result = extension_configs_to_mcp_servers(&[config]).await.unwrap();
         assert_eq!(result.len(), expected.len(), "server count mismatch");
         for (a, e) in result.iter().zip(expected.iter()) {
             match (a, e) {
@@ -4251,19 +4256,19 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_sse_skips() {
+    #[tokio::test]
+    async fn test_sse_skips() {
         let config = ExtensionConfig::Sse {
             name: "test-sse".into(),
             description: String::new(),
             uri: Some("https://example.com/sse".into()),
         };
-        let result = extension_configs_to_mcp_servers(&[config]);
+        let result = extension_configs_to_mcp_servers(&[config]).await.unwrap();
         assert!(result.is_empty());
     }
 
-    #[test]
-    fn test_filter_supported_servers_skips_http_without_capability() {
+    #[tokio::test]
+    async fn test_filter_supported_servers_skips_http_without_capability() {
         let config = ExtensionConfig::StreamableHttp {
             name: "github".into(),
             description: String::new(),
@@ -4280,9 +4285,41 @@ mod tests {
             available_tools: vec![],
         };
 
-        let servers = extension_configs_to_mcp_servers(&[config]);
+        let servers = extension_configs_to_mcp_servers(&[config]).await.unwrap();
         let filtered = filter_supported_servers(&servers, &McpCapabilities::default());
         assert!(filtered.is_empty());
+    }
+
+    #[tokio::test]
+    async fn extension_configs_resolve_secret_backed_http_headers() {
+        let config = ExtensionConfig::StreamableHttp {
+            name: "wiki".into(),
+            description: String::new(),
+            uri: "https://wiki.example/mcp".into(),
+            envs: Envs::new(
+                [(
+                    "ESI_WIKI_AUTHORIZATION".into(),
+                    "Bearer dedicated-session".into(),
+                )]
+                .into(),
+            ),
+            env_keys: vec![],
+            headers: HashMap::from([("Authorization".into(), "${ESI_WIKI_AUTHORIZATION}".into())]),
+            timeout: None,
+            socket: None,
+            client_id: None,
+            client_secret_key: None,
+            scopes: vec![],
+            bundled: Some(true),
+            available_tools: vec![],
+        };
+
+        let servers = extension_configs_to_mcp_servers(&[config]).await.unwrap();
+        let McpServer::Http(server) = &servers[0] else {
+            panic!("expected HTTP server");
+        };
+        assert_eq!(server.headers[0].name, "Authorization");
+        assert_eq!(server.headers[0].value, "Bearer dedicated-session");
     }
 
     #[test_case(GooseMode::Auto => Some(PermissionDecision::AllowOnce) ; "auto allows")]

@@ -76,7 +76,7 @@ impl ProviderDef for CodexAcpProvider {
                 .with_npm()
                 .resolve(CODEX_ACP_PROVIDER_NAME)?;
             let goose_mode = resolve_goose_mode(config.get_goose_mode_strict())?;
-            let mcp_servers = extension_configs_to_mcp_servers(&extensions);
+            let mcp_servers = extension_configs_to_mcp_servers(&extensions).await?;
 
             let mode_mapping = HashMap::from([
                 (GooseMode::Auto, vec!["agent-full-access".to_string()]),
