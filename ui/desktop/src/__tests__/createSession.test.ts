@@ -178,7 +178,7 @@ describe('createSession ACP session extensions', () => {
     await expect(
       createSession('/tmp', { recipeDeeplink: 'goose://recipe?url=example' })
     ).rejects.toThrow(
-      'The connected Goose server does not support securely scoped deeplink recipe parameters. Update the server and try again.'
+      'The connected ESI-Studio server does not support securely scoped deeplink recipe parameters. Update the server and try again.'
     );
 
     expect(mockedCreateAcpSession).not.toHaveBeenCalled();

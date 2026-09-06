@@ -4,8 +4,9 @@ use esi_development::{
     ValidationPlan, WorktreeReadyApproval,
 };
 use esi_development_visualizer::{
-    app_html, DevelopmentLoopView, DevelopmentVisualizerServer, ShowDevelopmentLoopParams,
-    VisualizerStatus, DEVELOPMENT_LOOP_RESOURCE_URI,
+    app_html, inspect_workspace, read_workspace_diff, read_workspace_file, DevelopmentLoopView,
+    DevelopmentVisualizerServer, ShowDevelopmentLoopParams, VisualizerStatus,
+    DEVELOPMENT_LOOP_RESOURCE_URI,
 };
 use esi_workspace::{
     LifecycleState, SessionId, WorktreeIdentity, WorktreeInspection, WorktreeRecord,
@@ -16,10 +17,26 @@ use esi_workspace_plan::{
 use rmcp::handler::server::wrapper::Parameters;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use tempfile::TempDir;
 
 fn source_path(worktree: &Path) -> PathBuf {
     worktree.join("source")
+}
+
+fn git(workspace: &Path, args: &[&str]) {
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(workspace)
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "git {:?} failed: {}",
+        args,
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn inspection(worktree: &Path) -> WorktreeInspection {
@@ -123,6 +140,7 @@ fn view_schema_exposes_every_read_only_section() {
     let schema = serde_json::to_string(&schemars::schema_for!(DevelopmentLoopView)).unwrap();
     for field in [
         "status",
+        "source",
         "current_stage",
         "workspace_plan",
         "stage_history",
@@ -132,6 +150,7 @@ fn view_schema_exposes_every_read_only_section() {
         "repair_budgets",
         "approvals",
         "events",
+        "workspace",
     ] {
         assert!(schema.contains(field), "schema missing {field}");
     }
@@ -275,7 +294,15 @@ fn html_is_self_contained_and_renders_required_content_regions() {
     }
     assert!(!html.contains("<script src="));
     assert!(!html.contains("<link rel="));
-    assert!(!html.contains("tools/call"));
+    for content in [
+        "File tree",
+        "File content",
+        "Diff",
+        "Workspace canvas",
+        "tools/call",
+    ] {
+        assert!(html.contains(content), "HTML missing {content}");
+    }
 }
 
 #[tokio::test]
@@ -285,7 +312,10 @@ async fn mcp_tool_loads_validated_persisted_state_as_structured_content() {
     let state = state_with_validator(temp.path(), "/bin/true", RepairPolicy::default());
     state.save(&state_path).unwrap();
     let result = DevelopmentVisualizerServer::new()
-        .show_development_loop(Parameters(ShowDevelopmentLoopParams { state_path }))
+        .show_development_loop(Parameters(ShowDevelopmentLoopParams {
+            workspace_path: None,
+            state_path: Some(state_path),
+        }))
         .await
         .unwrap();
 
@@ -301,4 +331,120 @@ async fn mcp_tool_loads_validated_persisted_state_as_structured_content() {
     let structured = result.structured_content.unwrap();
     assert_eq!(structured["run_id"], "run-visualizer");
     assert_eq!(structured["status"], "running");
+}
+
+#[tokio::test]
+async fn workspace_path_automatically_falls_back_to_a_live_snapshot() {
+    let temp = TempDir::new().unwrap();
+    fs::create_dir_all(temp.path().join("src")).unwrap();
+    fs::write(
+        temp.path().join("src/lib.rs"),
+        "pub fn answer() -> u8 { 42 }\n",
+    )
+    .unwrap();
+
+    let result = DevelopmentVisualizerServer::new()
+        .show_development_loop(Parameters(ShowDevelopmentLoopParams {
+            workspace_path: Some(temp.path().to_path_buf()),
+            state_path: None,
+        }))
+        .await
+        .unwrap();
+    let structured = result.structured_content.unwrap();
+    assert_eq!(structured["source"], "live_workspace");
+    assert_eq!(structured["current_stage"], "workspace_plan");
+    assert!(structured["workspace"]["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|entry| entry["path"] == "src/lib.rs"));
+}
+
+#[tokio::test]
+async fn workspace_path_discovers_controller_state() {
+    let temp = TempDir::new().unwrap();
+    let state = state_with_validator(temp.path(), "/bin/true", RepairPolicy::default());
+    let state_dir = temp.path().join(".esi");
+    fs::create_dir_all(&state_dir).unwrap();
+    state
+        .save(state_dir.join("development-state.json"))
+        .unwrap();
+
+    let result = DevelopmentVisualizerServer::new()
+        .show_development_loop(Parameters(ShowDevelopmentLoopParams {
+            workspace_path: Some(temp.path().to_path_buf()),
+            state_path: None,
+        }))
+        .await
+        .unwrap();
+    let structured = result.structured_content.unwrap();
+    assert_eq!(structured["source"], "controller_state");
+    assert_eq!(structured["run_id"], "run-visualizer");
+}
+
+#[test]
+fn workspace_inspector_reads_tree_file_and_untracked_diff() {
+    let temp = TempDir::new().unwrap();
+    git(temp.path(), &["init", "-q"]);
+    git(temp.path(), &["config", "user.name", "ESI Test"]);
+    git(
+        temp.path(),
+        &["config", "user.email", "esi@example.invalid"],
+    );
+    fs::create_dir_all(temp.path().join("src")).unwrap();
+    fs::write(
+        temp.path().join("src/lib.rs"),
+        "pub fn answer() -> u8 { 41 }\n",
+    )
+    .unwrap();
+    git(temp.path(), &["add", "src/lib.rs"]);
+    git(temp.path(), &["commit", "-qm", "initial"]);
+    fs::write(
+        temp.path().join("src/lib.rs"),
+        "pub fn answer() -> u8 { 42 }\n",
+    )
+    .unwrap();
+    fs::write(temp.path().join("notes.txt"), "new file\n").unwrap();
+    let snapshot = inspect_workspace(temp.path()).unwrap();
+    assert!(snapshot
+        .files
+        .iter()
+        .any(|entry| entry.path == "src/lib.rs"));
+    assert!(snapshot.changed_files.contains(&"src/lib.rs".to_string()));
+    assert!(snapshot.changed_files.contains(&"notes.txt".to_string()));
+
+    let file = read_workspace_file(temp.path(), "src/lib.rs").unwrap();
+    assert_eq!(file.language, "rust");
+    assert!(file.content.contains("answer"));
+
+    let diff = read_workspace_diff(temp.path(), Some("src/lib.rs")).unwrap();
+    assert!(diff.diff.contains("-pub fn answer() -> u8 { 41 }"));
+    assert!(diff.diff.contains("+pub fn answer() -> u8 { 42 }"));
+    let untracked = read_workspace_diff(temp.path(), Some("notes.txt")).unwrap();
+    assert!(untracked.diff.contains("new file mode"));
+    assert!(untracked.diff.contains("+new file"));
+}
+
+#[test]
+fn workspace_file_reader_rejects_escape_and_binary_content() {
+    let temp = TempDir::new().unwrap();
+    fs::write(temp.path().join("binary.bin"), [0, 1, 2, 3]).unwrap();
+    assert!(read_workspace_file(temp.path(), "../outside").is_err());
+    assert!(read_workspace_file(temp.path(), "binary.bin").is_err());
+}
+
+#[cfg(unix)]
+#[test]
+fn workspace_file_reader_rejects_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let workspace = TempDir::new().unwrap();
+    let outside = TempDir::new().unwrap();
+    fs::write(outside.path().join("secret.txt"), "outside").unwrap();
+    symlink(
+        outside.path().join("secret.txt"),
+        workspace.path().join("escape.txt"),
+    )
+    .unwrap();
+    assert!(read_workspace_file(workspace.path(), "escape.txt").is_err());
 }

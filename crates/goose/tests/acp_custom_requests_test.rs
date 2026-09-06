@@ -671,8 +671,10 @@ fn test_custom_list_builtin_skill_sources() {
             .expect("missing sources array");
         let builtin = sources
             .iter()
-            .find(|source| source.get("name") == Some(&serde_json::json!("goose-doc-guide")))
-            .expect("expected goose-doc-guide builtin skill");
+            .find(|source| source.get("name") == Some(&serde_json::json!("esi-local-development")))
+            .expect("expected esi-local-development builtin skill");
+
+        assert_eq!(sources.len(), 1);
 
         assert_eq!(
             builtin.get("type"),
@@ -681,7 +683,7 @@ fn test_custom_list_builtin_skill_sources() {
         assert_eq!(builtin.get("global"), Some(&serde_json::json!(true)));
         assert_eq!(
             builtin.get("path"),
-            Some(&serde_json::json!("builtin://skills/goose-doc-guide"))
+            Some(&serde_json::json!("builtin://skills/esi-local-development"))
         );
     });
 }

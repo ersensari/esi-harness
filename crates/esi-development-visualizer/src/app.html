@@ -1,192 +1,64 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ESI Development Run</title>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ESI Development Workspace</title>
   <style>
-    :root {
-      color-scheme: light dark;
-      --surface: var(--color-background-primary, light-dark(#f4f1ea, #171918));
-      --panel: var(--color-background-secondary, light-dark(#fffefb, #212422));
-      --ink: var(--color-text-primary, light-dark(#18201c, #f1f4ef));
-      --muted: var(--color-text-secondary, light-dark(#647069, #aab4ad));
-      --line: var(--color-border-default, light-dark(#d8d8d0, #3b403c));
-      --accent: light-dark(#006d5b, #62d4b7);
-      --warning: light-dark(#a05a00, #f3b35b);
-      --danger: light-dark(#b42318, #ff8a80);
-      --success: light-dark(#287a3d, #7bd88f);
-      --mono: "Berkeley Mono", "IBM Plex Mono", ui-monospace, monospace;
-      --sans: "IBM Plex Sans", "Avenir Next", sans-serif;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0;
-      min-width: 280px;
-      background:
-        linear-gradient(90deg, color-mix(in srgb, var(--line) 28%, transparent) 1px, transparent 1px),
-        var(--surface);
-      background-size: 24px 24px;
-      color: var(--ink);
-      font-family: var(--sans);
-      letter-spacing: 0;
-    }
-    main { max-width: 1160px; margin: 0 auto; padding: 20px; }
-    header {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr) auto;
-      gap: 16px;
-      align-items: end;
-      padding: 4px 0 18px;
-      border-bottom: 2px solid var(--ink);
-    }
-    .eyebrow { margin: 0 0 5px; color: var(--accent); font: 700 11px/1.2 var(--mono); text-transform: uppercase; }
-    h1 { margin: 0; font-size: clamp(22px, 4vw, 36px); line-height: 1; font-weight: 750; overflow-wrap: anywhere; }
-    #objective { margin: 8px 0 0; color: var(--muted); font-size: 14px; }
-    .status { padding: 8px 11px; border: 1px solid currentColor; font: 700 12px/1 var(--mono); text-transform: uppercase; }
-    .status[data-state="completed"] { color: var(--success); }
-    .status[data-state="failed"], .status[data-state="abandoned"] { color: var(--danger); }
-    .status[data-state="blocked"] { color: var(--warning); }
-    .stage-strip { display: flex; gap: 6px; overflow-x: auto; padding: 14px 0 2px; }
-    .stage {
-      flex: 0 0 auto;
-      padding: 7px 9px;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      color: var(--muted);
-      font: 600 11px/1 var(--mono);
-    }
-    .stage:last-child { border-color: var(--accent); color: var(--accent); }
-    .grid { display: grid; grid-template-columns: 1.1fr .9fr; gap: 12px; margin-top: 14px; }
-    section { min-width: 0; border-top: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 94%, transparent); padding: 14px; }
-    section.wide { grid-column: 1 / -1; }
-    h2 { display: flex; justify-content: space-between; margin: 0 0 11px; font-size: 13px; text-transform: uppercase; }
-    .count { color: var(--muted); font: 500 11px var(--mono); }
-    dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; margin: 0; font-size: 12px; }
-    dt { color: var(--muted); } dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
-    ul { list-style: none; margin: 0; padding: 0; }
-    li + li { margin-top: 7px; }
-    .row { padding: 9px; border-left: 3px solid var(--line); background: color-mix(in srgb, var(--surface) 68%, transparent); }
-    .row.passed, .row.completed { border-color: var(--success); }
-    .row.failed { border-color: var(--danger); }
-    .row.pending { border-color: var(--warning); }
-    .row-head { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; font-weight: 700; }
-    .row-meta, .detail { margin-top: 4px; color: var(--muted); font: 11px/1.45 var(--mono); overflow-wrap: anywhere; white-space: pre-wrap; }
-    .budget { display: grid; grid-template-columns: minmax(90px, 1fr) 2fr auto; gap: 8px; align-items: center; font-size: 12px; }
-    .track { height: 5px; background: var(--line); }
-    .fill { height: 100%; background: var(--accent); }
-    .files { columns: 2; column-gap: 18px; font: 11px/1.55 var(--mono); }
-    .files li { break-inside: avoid; overflow-wrap: anywhere; }
-    .empty { padding: 22px 8px; color: var(--muted); text-align: center; font-size: 13px; }
-    code { font-family: var(--mono); }
-    @media (max-width: 720px) {
-      main { padding: 14px; }
-      header, .grid { grid-template-columns: 1fr; }
-      .status { justify-self: start; }
-      section.wide { grid-column: auto; }
-      .files { columns: 1; }
-    }
+    :root{color-scheme:light dark;--surface:var(--color-background-primary,light-dark(#f4f1ea,#171918));--panel:var(--color-background-secondary,light-dark(#fffefb,#212422));--ink:var(--color-text-primary,light-dark(#18201c,#f1f4ef));--muted:var(--color-text-secondary,light-dark(#647069,#aab4ad));--line:var(--color-border-default,light-dark(#d8d8d0,#3b403c));--accent:light-dark(#006d5b,#62d4b7);--warning:light-dark(#a05a00,#f3b35b);--danger:light-dark(#b42318,#ff8a80);--success:light-dark(#287a3d,#7bd88f);--mono:ui-monospace,monospace;--sans:"IBM Plex Sans",sans-serif}
+    *{box-sizing:border-box}body{margin:0;min-width:280px;background:linear-gradient(90deg,color-mix(in srgb,var(--line) 28%,transparent) 1px,transparent 1px),var(--surface);background-size:24px 24px;color:var(--ink);font-family:var(--sans)}main{max-width:1280px;margin:auto;padding:20px}
+    header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:16px;align-items:end;padding:4px 0 18px;border-bottom:2px solid var(--ink)}.eyebrow{margin:0 0 5px;color:var(--accent);font:700 11px var(--mono);text-transform:uppercase}h1{margin:0;font-size:clamp(22px,4vw,36px);line-height:1;overflow-wrap:anywhere}#objective{margin:8px 0 0;color:var(--muted);font-size:14px}.source{display:block;margin-top:7px;color:var(--muted);font:600 10px var(--mono);text-transform:uppercase}.status{padding:8px 11px;border:1px solid;font:700 12px var(--mono);text-transform:uppercase}.status[data-state=completed]{color:var(--success)}.status[data-state=failed],.status[data-state=abandoned]{color:var(--danger)}.status[data-state=blocked]{color:var(--warning)}
+    .stage-strip{display:flex;gap:6px;overflow:auto;padding:14px 0 2px}.stage{flex:none;padding:7px 9px;border:1px solid var(--line);background:var(--panel);color:var(--muted);font:600 11px var(--mono)}.stage:last-child{border-color:var(--accent);color:var(--accent)}.grid{display:grid;grid-template-columns:1.1fr .9fr;gap:12px;margin-top:14px}section{min-width:0;border-top:1px solid var(--line);background:color-mix(in srgb,var(--panel) 94%,transparent);padding:14px}section.wide{grid-column:1/-1}h2{display:flex;justify-content:space-between;margin:0 0 11px;font-size:13px;text-transform:uppercase}.count{color:var(--muted);font:500 11px var(--mono)}
+    dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:6px 12px;margin:0;font-size:12px}dt{color:var(--muted)}dd{margin:0;font-family:var(--mono);overflow-wrap:anywhere}ul{list-style:none;margin:0;padding:0}li+li{margin-top:7px}.row{padding:9px;border-left:3px solid var(--line);background:color-mix(in srgb,var(--surface) 68%,transparent)}.row.passed,.row.completed{border-color:var(--success)}.row.failed{border-color:var(--danger)}.row.pending{border-color:var(--warning)}.row-head{display:flex;justify-content:space-between;gap:10px;font-size:12px;font-weight:700}.row-meta,.detail{margin-top:4px;color:var(--muted);font:11px/1.45 var(--mono);overflow-wrap:anywhere;white-space:pre-wrap}.budget{display:grid;grid-template-columns:minmax(90px,1fr) 2fr auto;gap:8px;align-items:center;font-size:12px}.track{height:5px;background:var(--line)}.fill{height:100%;background:var(--accent)}.files{columns:2;font:11px/1.55 var(--mono)}.empty{padding:22px 8px;color:var(--muted);text-align:center;font-size:13px}
+    .workspace-shell{display:grid;grid-template-columns:minmax(220px,.34fr) minmax(0,1fr);min-height:430px;border:1px solid var(--line)}.tree-pane{min-width:0;border-right:1px solid var(--line);background:color-mix(in srgb,var(--surface) 72%,transparent)}.tree-meta{padding:9px 10px;border-bottom:1px solid var(--line);color:var(--muted);font:10px/1.4 var(--mono);overflow-wrap:anywhere}#file-tree{max-height:520px;overflow:auto;padding:6px}.tree-entry{display:block;width:100%;border:0;padding:5px 7px;background:transparent;color:var(--ink);text-align:left;font:11px/1.35 var(--mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}button.tree-entry{cursor:pointer}button.tree-entry:hover,button.tree-entry.active{background:color-mix(in srgb,var(--accent) 16%,transparent);color:var(--accent)}.tree-entry.changed:after{content:" M";color:var(--warning);font-weight:800}.viewer{min-width:0;display:grid;grid-template-rows:auto minmax(0,1fr)}.viewer-head{display:flex;align-items:center;gap:7px;min-height:39px;padding:6px 9px;border-bottom:1px solid var(--line)}#selected-path{margin-right:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11px var(--mono)}.tab{border:1px solid var(--line);padding:5px 8px;background:transparent;color:var(--muted);font:700 10px var(--mono);text-transform:uppercase;cursor:pointer}.tab.active{border-color:var(--accent);color:var(--accent)}pre{margin:0;min-height:390px;max-height:520px;overflow:auto;padding:14px;background:color-mix(in srgb,var(--surface) 86%,black 4%);font:11px/1.55 var(--mono);tab-size:2;white-space:pre}#workspace-canvas{display:block;width:100%;height:280px;border:1px solid var(--line);background:var(--surface)}.canvas-note{margin:8px 0 0;color:var(--muted);font:10px var(--mono)}
+    @media(max-width:720px){main{padding:14px}header,.grid,.workspace-shell{grid-template-columns:1fr}.status{justify-self:start}section.wide{grid-column:auto}.files{columns:1}.tree-pane{border-right:0;border-bottom:1px solid var(--line)}#file-tree{max-height:250px}}
   </style>
 </head>
-<body>
-  <main>
-    <header>
-      <div><p class="eyebrow">Local deterministic workflow</p><h1 id="run-title">No active run</h1><p id="objective">Waiting for persisted controller state.</p></div>
-      <div id="status" class="status" data-state="empty">Empty</div>
-    </header>
-    <div id="stage-history" class="stage-strip" aria-label="Stage history"></div>
-    <div class="grid">
-      <section class="wide" id="workspace-plan-panel"><h2>Workspace plan <span id="workspace-plan-status" class="count">missing</span></h2><div id="workspace-plan" class="empty">No workspace plan loaded.</div></section>
-      <section id="worktree-panel"><h2>Worktree</h2><div id="worktree" class="empty">No worktree bound.</div></section>
-      <section id="repair-panel"><h2>Repair budgets <span id="repair-count" class="count">0</span></h2><ul id="repair-budgets"></ul></section>
-      <section class="wide" id="changed-files-panel"><h2>Changed files <span id="file-count" class="count">0</span></h2><ul id="changed-files" class="files"></ul></section>
-      <section class="wide" id="validation-panel"><h2>Validation evidence <span id="validation-count" class="count">0</span></h2><ul id="validation-evidence"></ul></section>
-      <section id="fingerprint-panel"><h2>Fingerprints <span id="fingerprint-count" class="count">0</span></h2><ul id="fingerprints"></ul></section>
-      <section id="approval-panel"><h2>Approvals <span id="approval-count" class="count">0</span></h2><ul id="approvals"></ul></section>
-      <section class="wide" id="event-panel"><h2>Controller events <span id="event-count" class="count">0</span></h2><ul id="events"></ul></section>
-    </div>
-  </main>
-  <script>
-    (() => {
-      "use strict";
-      let requestId = 1;
-      const byId = (id) => document.getElementById(id);
-      const text = (tag, value, className) => { const node = document.createElement(tag); node.textContent = value; if (className) node.className = className; return node; };
-      const empty = (list, message) => list.appendChild(text("li", message, "empty"));
-      const renderList = (id, items, renderer, message) => { const list = byId(id); list.replaceChildren(); items.length ? items.forEach((item) => list.appendChild(renderer(item))) : empty(list, message); };
-      const row = (title, state, meta, detail) => { const item = text("li", "", `row ${state || ""}`); const head = text("div", "", "row-head"); head.append(text("span", title), text("span", state || "")); item.append(head); if (meta) item.append(text("div", meta, "row-meta")); if (detail) item.append(text("div", detail, "detail")); return item; };
-
-      function render(data) {
-        if (!data || !data.status) return;
-        byId("run-title").textContent = data.run_id || "No active run";
-        byId("objective").textContent = data.objective || "Waiting for persisted controller state.";
-        byId("status").textContent = data.status;
-        byId("status").dataset.state = data.status;
-        renderList("stage-history", data.stage_history || [], (item) => text("span", item.stage.replaceAll("_", " "), "stage"), "No stage history.");
-
-        const plan = data.workspace_plan || { status: "missing", message: "No workspace plan exists.", requirements: [], tasks: [] };
-        byId("workspace-plan-status").textContent = plan.status;
-        const planPanel = byId("workspace-plan");
-        planPanel.replaceChildren();
-        planPanel.className = "";
-        const summary = text("div", plan.message || "", `row ${plan.implementation_allowed ? "completed" : "pending"}`);
-        if (plan.title) summary.prepend(text("div", plan.title, "row-head"));
-        if (plan.description) summary.append(text("div", plan.description, "detail"));
-        if (plan.approval) summary.append(text("div", `Approved by ${plan.approval.approved_by} at ${plan.approval.approved_at}`, "row-meta"));
-        planPanel.append(summary);
-        if (plan.innovation) planPanel.append(row("Innovation discovery", "", `${plan.innovation.candidates.length} candidate(s) · ${plan.innovation.research_findings.length} finding(s)`, [plan.innovation.brief, plan.innovation.selected_rationale].filter(Boolean).join("\n")));
-        if (plan.requirements?.length) {
-          const requirements = text("ul", "", "");
-          plan.requirements.forEach((item) => requirements.append(row(`${item.id} · ${item.priority}`, "", item.acceptance_criteria.join(" · "), item.description)));
-          planPanel.append(text("h2", `Requirements (${plan.requirements.length})`), requirements);
-        }
-        if (plan.tasks?.length) {
-          const tasks = text("ul", "", "");
-          plan.tasks.forEach((item) => tasks.append(row(`${item.id} · ${item.title}`, item.status, "", item.description)));
-          planPanel.append(text("h2", `Planned tasks (${plan.tasks.length})`), tasks);
-        }
-
-        const worktree = byId("worktree");
-        worktree.replaceChildren();
-        if (data.worktree) {
-          const details = document.createElement("dl");
-          [["Repository", data.worktree.repository_id], ["Session", data.worktree.session_id], ["Branch", data.worktree.branch], ["Path", data.worktree.worktree_path], ["Head", data.worktree.head], ["Snapshot", data.worktree.snapshot_id]].forEach(([key, value]) => details.append(text("dt", key), text("dd", value)));
-          worktree.className = ""; worktree.append(details);
-        } else { worktree.className = "empty"; worktree.textContent = "No worktree bound."; }
-
-        const files = data.worktree?.changed_files || [];
-        byId("file-count").textContent = files.length;
-        renderList("changed-files", files, (file) => text("li", file), "No changed files captured.");
-        byId("validation-count").textContent = data.validation_evidence.length;
-        renderList("validation-evidence", data.validation_evidence, (item) => row(item.validator_id, item.outcome, `attempt ${item.attempt} · ${item.category} · exit ${item.exit_code ?? "n/a"}`, [item.command.join(" "), item.output].filter(Boolean).join("\n")), "No validation evidence yet.");
-        byId("fingerprint-count").textContent = data.fingerprints.length;
-        renderList("fingerprints", data.fingerprints, (item) => row(item.category || "failure", item.occurrences > 1 ? "repeated" : "recorded", `${item.occurrences} occurrence(s) · ${item.source_id || "unknown source"}`, `${item.fingerprint}\n${item.summary || ""}`), "No failure fingerprints.");
-        byId("repair-count").textContent = data.repair_budgets.length;
-        renderList("repair-budgets", data.repair_budgets, (item) => { const li = text("li", "", "budget"); const total = item.base_budget + item.extensions; const track = text("div", "", "track"); const fill = text("div", "", "fill"); fill.style.width = `${total ? Math.min(100, item.attempts / total * 100) : 100}%`; track.append(fill); li.append(text("span", item.category), track, text("code", `${item.remaining} left`)); return li; }, "No repair budgets.");
-        byId("approval-count").textContent = data.approvals.length;
-        renderList("approvals", data.approvals, (item) => row(item.gate_id, item.state, item.approved_by ? `by ${item.approved_by}` : "human action required", item.summary), "No approvals recorded or pending.");
-        byId("event-count").textContent = data.events.length;
-        renderList("events", data.events, (item) => row(`#${item.sequence} ${item.kind}`, "", item.stage, item.detail), "No controller events.");
-        queueMicrotask(reportSize);
-      }
-
-      function post(method, params, id) { window.parent.postMessage({ jsonrpc: "2.0", ...(id ? { id } : {}), method, params }, "*"); }
-      function reportSize() { post("ui/notifications/size-changed", { width: document.body.scrollWidth, height: document.documentElement.scrollHeight }); }
-      window.addEventListener("message", (event) => {
-        const message = event.data;
-        if (!message || message.jsonrpc !== "2.0") return;
-        if (message.method === "ui/notifications/tool-result") render(message.params?.structuredContent);
-        if (message.method === "ui/notifications/host-context-changed") {
-          const context = message.params || {};
-          if (context.theme) document.documentElement.style.colorScheme = context.theme;
-          Object.entries(context.styles?.variables || {}).forEach(([key, value]) => value && document.documentElement.style.setProperty(key, value));
-        }
-        if (message.method === "ui/resource-teardown" && message.id) window.parent.postMessage({ jsonrpc: "2.0", id: message.id, result: {} }, "*");
-        if (message.id === requestId) { post("ui/notifications/initialized", {}); reportSize(); }
-      });
-      new ResizeObserver(reportSize).observe(document.body);
-      post("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "esi-development-visualizer", version: "1.0.0" }, appCapabilities: { availableDisplayModes: ["inline", "fullscreen"] } }, requestId);
-    })();
-  </script>
-</body>
+<body><main>
+  <header><div><p class="eyebrow">Local deterministic workflow</p><h1 id="run-title">No active run</h1><p id="objective">Waiting for workspace state.</p><span id="source" class="source">empty</span></div><div id="status" class="status" data-state="empty">Empty</div></header>
+  <div id="stage-history" class="stage-strip" aria-label="Stage history"></div>
+  <div class="grid">
+    <section class="wide"><h2>Workspace explorer <span id="tree-count" class="count">0 files</span></h2><div class="workspace-shell"><aside class="tree-pane"><div id="tree-meta" class="tree-meta">No workspace loaded.</div><div id="file-tree" aria-label="File tree"></div></aside><div class="viewer"><div class="viewer-head"><span id="selected-path">Select a file</span><button id="content-tab" class="tab active">File content</button><button id="diff-tab" class="tab">Diff</button></div><pre id="file-viewer">Select a file from the tree.</pre></div></div></section>
+    <section class="wide"><h2>Workspace canvas <span class="count">read-only</span></h2><canvas id="workspace-canvas"></canvas><p class="canvas-note">Live structure and controller stages. The canvas cannot edit files or advance workflow state.</p></section>
+    <section class="wide"><h2>Workspace plan <span id="workspace-plan-status" class="count">missing</span></h2><div id="workspace-plan" class="empty">No workspace plan loaded.</div></section>
+    <section><h2>Worktree</h2><div id="worktree" class="empty">No worktree bound.</div></section>
+    <section><h2>Repair budgets <span id="repair-count" class="count">0</span></h2><ul id="repair-budgets"></ul></section>
+    <section class="wide"><h2>Changed files <span id="file-count" class="count">0</span></h2><ul id="changed-files" class="files"></ul></section>
+    <section class="wide"><h2>Validation evidence <span id="validation-count" class="count">0</span></h2><ul id="validation-evidence"></ul></section>
+    <section><h2>Fingerprints <span id="fingerprint-count" class="count">0</span></h2><ul id="fingerprints"></ul></section>
+    <section><h2>Approvals <span id="approval-count" class="count">0</span></h2><ul id="approvals"></ul></section>
+    <section class="wide"><h2>Controller events <span id="event-count" class="count">0</span></h2><ul id="events"></ul></section>
+  </div>
+</main><script>
+(()=>{
+  "use strict";let requestId=1,data=null,selected=null,activeTab="content";const pending=new Map(),cache=new Map(),byId=id=>document.getElementById(id);
+  const text=(tag,value,className)=>{const n=document.createElement(tag);n.textContent=value;if(className)n.className=className;return n};
+  const empty=(list,message)=>list.appendChild(text("li",message,"empty"));
+  const renderList=(id,items,renderer,message)=>{const list=byId(id);list.replaceChildren();items.length?items.forEach(item=>list.appendChild(renderer(item))):empty(list,message)};
+  const row=(title,state,meta,detail)=>{const item=text("li","",`row ${state||""}`),head=text("div","","row-head");head.append(text("span",title),text("span",state||""));item.append(head);if(meta)item.append(text("div",meta,"row-meta"));if(detail)item.append(text("div",detail,"detail"));return item};
+  const post=(method,params,id)=>window.parent.postMessage(method===undefined?{jsonrpc:"2.0",id,result:params}:{jsonrpc:"2.0",...(id?{id}:{}),method,params},"*");
+  const callTool=(name,args)=>{const id=++requestId;return new Promise((resolve,reject)=>{pending.set(id,{resolve,reject});post("tools/call",{name,arguments:args},id)})};
+  const structured=result=>result?.structuredContent||result?.structured_content||null;
+  async function loadSelected(){if(!selected||!data?.workspace?.root)return;const viewer=byId("file-viewer"),key=`${activeTab}:${selected}`;if(cache.has(key)){viewer.textContent=cache.get(key);return}viewer.textContent=`Loading ${activeTab}…`;try{const result=activeTab==="content"?await callTool("read_workspace_file",{workspace_path:data.workspace.root,path:selected}):await callTool("read_workspace_diff",{workspace_path:data.workspace.root,path:selected}),value=structured(result),output=activeTab==="content"?value?.content:value?.diff,rendered=output||(activeTab==="diff"?"No Git diff for this file.":"File is empty.");cache.set(key,rendered+(value?.truncated?"\n\n… output truncated …":""));viewer.textContent=cache.get(key)}catch(error){viewer.textContent=`Unable to load ${selected}: ${error?.message||error}`}}
+  function selectFile(path,button){selected=path;byId("selected-path").textContent=path;document.querySelectorAll(".tree-entry.active").forEach(n=>n.classList.remove("active"));button.classList.add("active");loadSelected()}
+  function renderTree(workspace){const tree=byId("file-tree");tree.replaceChildren();if(!workspace){tree.append(text("div","No workspace loaded.","empty"));return}byId("tree-meta").textContent=[workspace.root,workspace.branch||"no branch",workspace.head||"no commit"].join(" · ");const entries=workspace.files||[];byId("tree-count").textContent=`${entries.filter(e=>e.kind==="file").length} files${workspace.tree_truncated?" +":""}`;entries.forEach(entry=>{const depth=entry.path.split("/").length-1,isFile=entry.kind==="file",node=text(isFile?"button":"div",`${isFile?"·":entry.kind==="directory"?"▾":"↗"} ${entry.path.split("/").pop()}`,`tree-entry${entry.changed?" changed":""}`);node.style.paddingLeft=`${7+depth*13}px`;node.title=entry.path;if(isFile){node.type="button";node.addEventListener("click",()=>selectFile(entry.path,node))}tree.append(node)})}
+  function drawCanvas(view){
+    const canvas=byId("workspace-canvas"),rect=canvas.getBoundingClientRect(),scale=window.devicePixelRatio||1,width=Math.max(320,Math.floor(rect.width));
+    canvas.width=width*scale;canvas.height=280*scale;
+    const ctx=canvas.getContext("2d"),styles=getComputedStyle(document.documentElement),ink=styles.getPropertyValue("--ink").trim(),muted=styles.getPropertyValue("--muted").trim(),accent=styles.getPropertyValue("--accent").trim(),line=styles.getPropertyValue("--line").trim();
+    ctx.scale(scale,scale);ctx.clearRect(0,0,width,280);ctx.font="11px ui-monospace,monospace";ctx.fillStyle=muted;ctx.fillText("WORKFLOW",18,25);
+    const stages=(view.stage_history||[]).map(x=>x.stage),shown=stages.length?stages.slice(-8):[view.current_stage||"workspace snapshot"],gap=Math.max(78,Math.min(140,(width-36)/shown.length));
+    shown.forEach((stage,i)=>{const x=18+i*gap;if(i){ctx.strokeStyle=line;ctx.beginPath();ctx.moveTo(x-gap+58,64);ctx.lineTo(x-7,64);ctx.stroke()}ctx.fillStyle=i===shown.length-1?accent:line;ctx.fillRect(x,45,62,38);ctx.fillStyle=ink;ctx.fillText(stage.replaceAll("_"," ").slice(0,12),x+4,68)});
+    ctx.fillStyle=muted;ctx.fillText("WORKSPACE",18,119);if(!view.workspace){ctx.fillText("No workspace snapshot",18,145);return}
+    const counts={};(view.workspace.files||[]).filter(e=>e.kind==="file").forEach(e=>{const top=e.path.split("/")[0]||".";counts[top]=(counts[top]||0)+1});
+    const groups=Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,9),max=Math.max(1,...groups.map(x=>x[1]));
+    groups.forEach(([name,count],i)=>{const y=139+i*14;ctx.fillStyle=line;ctx.fillRect(104,y-9,Math.max(1,width-150),7);ctx.fillStyle=accent;ctx.fillRect(104,y-9,Math.max(2,(width-150)*count/max),7);ctx.fillStyle=ink;ctx.fillText(name.slice(0,12),18,y);ctx.fillText(String(count),width-32,y)})
+  }
+  function render(view){if(!view?.status)return;data=view;cache.clear();selected=null;byId("run-title").textContent=view.run_id||view.workspace_plan?.title||"Workspace snapshot";byId("objective").textContent=view.objective||"Read-only live workspace inspection.";byId("source").textContent=view.source==="controller_state"?"controller state":"live workspace snapshot";byId("status").textContent=view.status;byId("status").dataset.state=view.status;renderList("stage-history",view.stage_history||[],item=>text("span",item.stage.replaceAll("_"," "),"stage"),view.current_stage||"No controller stage history.");renderTree(view.workspace);
+    const plan=view.workspace_plan||{status:"missing",message:"No workspace plan exists.",requirements:[],tasks:[]};byId("workspace-plan-status").textContent=plan.status;const panel=byId("workspace-plan");panel.replaceChildren();panel.className="";const summary=text("div",plan.message||"",`row ${plan.implementation_allowed?"completed":"pending"}`);if(plan.title)summary.prepend(text("div",plan.title,"row-head"));if(plan.description)summary.append(text("div",plan.description,"detail"));if(plan.approval)summary.append(text("div",`Approved by ${plan.approval.approved_by} at ${plan.approval.approved_at}`,"row-meta"));panel.append(summary);if(plan.innovation)panel.append(row("Innovation discovery","",`${plan.innovation.candidates.length} candidate(s) · ${plan.innovation.research_findings.length} finding(s)`,[plan.innovation.brief,plan.innovation.selected_rationale].filter(Boolean).join("\n")));if(plan.requirements?.length){const list=text("ul","","");plan.requirements.forEach(x=>list.append(row(`${x.id} · ${x.priority}`,"",x.acceptance_criteria.join(" · "),x.description)));panel.append(text("h2",`Requirements (${plan.requirements.length})`),list)}if(plan.tasks?.length){const list=text("ul","","");plan.tasks.forEach(x=>list.append(row(`${x.id} · ${x.title}`,x.status,"",x.description)));panel.append(text("h2",`Planned tasks (${plan.tasks.length})`),list)}
+    const worktree=byId("worktree"),w=view.worktree||view.workspace;worktree.replaceChildren();if(w){const dl=document.createElement("dl"),pairs=view.worktree?[["Repository",w.repository_id],["Session",w.session_id],["Branch",w.branch],["Path",w.worktree_path],["Head",w.head],["Snapshot",w.snapshot_id]]:[["Path",w.root],["Branch",w.branch||"n/a"],["Head",w.head||"n/a"],["Dirty",String(w.dirty)]];pairs.forEach(([k,v])=>dl.append(text("dt",k),text("dd",v)));worktree.className="";worktree.append(dl)}else{worktree.className="empty";worktree.textContent="No worktree bound."}
+    const changed=view.workspace?.changed_files||view.worktree?.changed_files||[];byId("file-count").textContent=changed.length;renderList("changed-files",changed,f=>text("li",f),"No changed files captured.");byId("validation-count").textContent=view.validation_evidence.length;renderList("validation-evidence",view.validation_evidence,x=>row(x.validator_id,x.outcome,`attempt ${x.attempt} · ${x.category} · exit ${x.exit_code??"n/a"}`,[x.command.join(" "),x.output].filter(Boolean).join("\n")),"No validation evidence yet.");byId("fingerprint-count").textContent=view.fingerprints.length;renderList("fingerprints",view.fingerprints,x=>row(x.category||"failure",x.occurrences>1?"repeated":"recorded",`${x.occurrences} occurrence(s) · ${x.source_id||"unknown source"}`,`${x.fingerprint}\n${x.summary||""}`),"No failure fingerprints.");byId("repair-count").textContent=view.repair_budgets.length;renderList("repair-budgets",view.repair_budgets,x=>{const li=text("li","","budget"),total=x.base_budget+x.extensions,track=text("div","","track"),fill=text("div","","fill");fill.style.width=`${total?Math.min(100,x.attempts/total*100):100}%`;track.append(fill);li.append(text("span",x.category),track,text("code",`${x.remaining} left`));return li},"No repair budgets.");byId("approval-count").textContent=view.approvals.length;renderList("approvals",view.approvals,x=>row(x.gate_id,x.state,x.approved_by?`by ${x.approved_by}`:"human action required",x.summary),"No approvals recorded or pending.");byId("event-count").textContent=view.events.length;renderList("events",view.events,x=>row(`#${x.sequence} ${x.kind}`,"",x.stage,x.detail),view.source==="live_workspace"?"Live snapshots do not invent controller events.":"No controller events.");queueMicrotask(()=>{drawCanvas(view);reportSize()})}
+  function setTab(tab){activeTab=tab;byId("content-tab").classList.toggle("active",tab==="content");byId("diff-tab").classList.toggle("active",tab==="diff");loadSelected()}byId("content-tab").addEventListener("click",()=>setTab("content"));byId("diff-tab").addEventListener("click",()=>setTab("diff"));
+  const reportSize=()=>post("ui/notifications/size-changed",{width:document.body.scrollWidth,height:document.documentElement.scrollHeight});window.addEventListener("resize",()=>data&&drawCanvas(data));window.addEventListener("message",event=>{const message=event.data;if(!message||message.jsonrpc!=="2.0")return;if(message.id&&pending.has(message.id)){const handler=pending.get(message.id);pending.delete(message.id);message.error?handler.reject(new Error(message.error.message||"Tool call failed")):handler.resolve(message.result);return}if(message.method==="ui/notifications/tool-result")render(message.params?.structuredContent);if(message.method==="ui/notifications/host-context-changed"){const context=message.params||{};if(context.theme)document.documentElement.style.colorScheme=context.theme;Object.entries(context.styles?.variables||{}).forEach(([k,v])=>v&&document.documentElement.style.setProperty(k,v));if(data)drawCanvas(data)}if(message.method==="ui/resource-teardown"&&message.id)post(undefined,{},message.id);if(message.id===1){post("ui/notifications/initialized",{});reportSize()}});new ResizeObserver(reportSize).observe(document.body);post("ui/initialize",{protocolVersion:"2026-01-26",appInfo:{name:"esi-development-visualizer",version:"1.1.0"},appCapabilities:{availableDisplayModes:["inline","fullscreen"]}},1);
+})();
+  </script></body>
 </html>

@@ -3,6 +3,7 @@ pub mod apps;
 pub mod chatrecall;
 #[cfg(feature = "code-mode")]
 pub mod code_execution;
+pub mod context_management;
 pub mod developer;
 pub mod ext_manager;
 pub mod orchestrator;
@@ -162,6 +163,24 @@ pub static PLATFORM_EXTENSIONS: Lazy<HashMap<&'static str, PlatformExtensionDef>
                             code_execution::get_tool_disclosure(),
                         )
                         .unwrap(),
+                    ))
+                },
+            },
+        );
+
+        map.insert(
+            context_management::EXTENSION_NAME,
+            PlatformExtensionDef {
+                name: context_management::EXTENSION_NAME,
+                display_name: "ESI Context Management",
+                description:
+                    "Compact sessions locally, recall archived context, and prepare portable handoffs",
+                default_enabled: true,
+                unprefixed_tools: false,
+                hidden: false,
+                client_factory: |ctx| {
+                    Some(Box::new(
+                        context_management::ContextManagementClient::new(ctx).unwrap(),
                     ))
                 },
             },

@@ -1548,16 +1548,7 @@ mod tests {
     #[test]
     fn list_sources_lists_builtin_skills() {
         let listed = list_sources(Some(SourceType::BuiltinSkill), None, false).unwrap();
-        let documentation = listed
-            .iter()
-            .find(|source| source.name == "goose-doc-guide")
-            .expect("expected goose-doc-guide builtin skill");
-
-        assert_eq!(documentation.source_type, SourceType::BuiltinSkill);
-        assert!(documentation.global);
-        assert_eq!(documentation.path, "builtin://skills/goose-doc-guide");
-        assert!(documentation.supporting_files.is_empty());
-        assert!(!documentation.content.is_empty());
+        assert_eq!(listed.len(), 1);
 
         let development = listed
             .iter()
@@ -1566,7 +1557,7 @@ mod tests {
         assert_eq!(development.source_type, SourceType::BuiltinSkill);
         assert!(development.global);
         assert_eq!(development.path, "builtin://skills/esi-local-development");
-        assert!(development.content.contains("normal Goose tools"));
+        assert!(development.content.contains("normal ESI-Studio tools"));
         assert!(development.content.contains("only authority"));
         assert!(development.content.contains("Never call ForgeLoop"));
         for forbidden in [
@@ -1599,12 +1590,12 @@ mod tests {
         let skill_dir = project
             .join(".agents")
             .join("skills")
-            .join("goose-doc-guide");
+            .join("esi-local-development");
         std::fs::create_dir_all(&skill_dir).unwrap();
         std::fs::write(
             skill_dir.join("SKILL.md"),
             build_skill_md(
-                "goose-doc-guide",
+                "esi-local-development",
                 "project override",
                 "Use project docs",
                 &HashMap::new(),
@@ -1620,7 +1611,7 @@ mod tests {
         .unwrap();
         assert!(!builtins
             .iter()
-            .any(|source| source.name == "goose-doc-guide"));
+            .any(|source| source.name == "esi-local-development"));
 
         let skills = list_sources(
             Some(SourceType::Skill),
@@ -1630,7 +1621,7 @@ mod tests {
         .unwrap();
         let project_skill = skills
             .iter()
-            .find(|source| source.name == "goose-doc-guide")
+            .find(|source| source.name == "esi-local-development")
             .expect("expected project skill");
         assert_eq!(project_skill.source_type, SourceType::Skill);
         assert_eq!(project_skill.description, "project override");

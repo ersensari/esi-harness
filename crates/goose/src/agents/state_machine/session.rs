@@ -84,6 +84,18 @@ impl EffectHandler<Session, GooseEffect> for SessionManager {
                     })
                     .await?;
                 }
+                GooseEffect::Conversation(ConversationEffect::SetMessageOperationNote {
+                    message_id,
+                    operation,
+                    key,
+                    value,
+                }) => {
+                    self.update_message_metadata(&session.id, message_id, |mut metadata| {
+                        metadata.set_operation_note(operation, key, value.clone());
+                        metadata
+                    })
+                    .await?;
+                }
                 GooseEffect::SetRecipe(recipe) => {
                     self.update(&session.id)
                         .recipe(recipe.as_ref().clone())

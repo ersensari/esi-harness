@@ -306,7 +306,7 @@ describe('App Component - Brand New State', () => {
 
     await waitFor(() => {
       expect(mockToastError).toHaveBeenCalledWith(
-        'The connected Goose server does not support securely scoped deeplink recipe parameters. Update the server and try again.'
+        'The connected ESI-Studio server does not support securely scoped deeplink recipe parameters. Update the server and try again.'
       );
     });
     expect(mockNavigate).toHaveBeenCalledWith('/');

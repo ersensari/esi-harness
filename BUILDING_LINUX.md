@@ -147,7 +147,7 @@ cd /path/to/goose/ui/desktop/out/goose-linux-x64
 ```
 
 #### Goose Binary Not Found
-If you see "Goose binary not found", ensure you've:
+If you see "ESI-Studio backend binary not found", ensure you've:
 1. Built the Rust binary: `cargo build --release -p goose-cli --bin goose`
 2. Copied it to the right location: `cp ../../target/release/goose src/bin/`
 3. Rebuilt the application: `pnpm run make`

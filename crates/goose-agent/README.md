@@ -22,8 +22,8 @@ is a function of the persisted conversation, not of in-memory loop state.
   `step()` runs one pass, `apply()` writes effects back, `run()` loops until a
   step yields to the client or no step applies.
 - **`ConversationEffect`** — the default effect type: `AppendMessage`,
-  `ReplaceConversation`, `PatchToolRequestMeta`, `SetMessageVisibility`. Bring
-  your own by implementing `MachineEffect`.
+  `ReplaceConversation`, `PatchToolRequestMeta`, `SetMessageVisibility`,
+  `SetMessageOperationNote`. Bring your own by implementing `MachineEffect`.
 - **`Emitter`** — streams `AgentEvent`s (`Message`, `Usage`, `MessageUsage`,
   `McpNotification`, `HistoryReplaced`) to the client while a step runs, and
   carries the cancellation token.

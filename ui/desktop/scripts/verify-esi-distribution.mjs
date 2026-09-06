@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -100,12 +100,20 @@ const developmentSkill = readFileSync(
   resolve(repoRoot, 'crates', 'goose', 'src', 'skills', 'builtins', 'esi_local_development.md'),
   'utf8'
 );
+const builtInSkillsDir = resolve(repoRoot, 'crates', 'goose', 'src', 'skills', 'builtins');
+assert.deepEqual(
+  readdirSync(builtInSkillsDir).filter((file) => file.endsWith('.md')).sort(),
+  ['esi_local_development.md'],
+  'ESI-Studio must ship only the ESI local development built-in skill'
+);
 for (const expected of [
   'name: esi-local-development',
-  'normal Goose tools',
+  'normal ESI-Studio tools',
   'only authority',
   'Never call ForgeLoop',
   'provider-neutral',
+  'esi-development-visualizer__show_development_loop',
+  'workspace_path',
 ]) {
   assert.ok(developmentSkill.includes(expected), `missing development skill contract: ${expected}`);
 }
@@ -116,9 +124,23 @@ const visualizerSource = readFileSync(
 );
 assert.ok(visualizerSource.includes('ui://esi-development/run'));
 assert.ok(visualizerSource.includes('DevelopmentState::load'));
+assert.ok(visualizerSource.includes('live_workspace'));
+assert.ok(visualizerSource.includes('read_workspace_file'));
+assert.ok(visualizerSource.includes('read_workspace_diff'));
 assert.ok(!visualizerSource.includes('FORGELOOP_SERVER'));
 assert.ok(!visualizerSource.includes('LITELLM_'));
-assert.ok(existsSync(resolve(repoRoot, 'crates', 'esi-development-visualizer', 'src', 'app.html')));
+const visualizerAppPath = resolve(
+  repoRoot,
+  'crates',
+  'esi-development-visualizer',
+  'src',
+  'app.html'
+);
+assert.ok(existsSync(visualizerAppPath));
+const visualizerApp = readFileSync(visualizerAppPath, 'utf8');
+for (const expected of ['File tree', 'File content', 'Diff', 'Workspace canvas', 'tools/call']) {
+  assert.ok(visualizerApp.includes(expected), `missing visualizer app contract: ${expected}`);
+}
 for (const forbidden of [
   /https?:\/\//,
   /LITELLM_/,
@@ -220,13 +242,38 @@ assert.ok(i18nSource.includes('(?!:\\/\\/)'), 'goose:// compatibility links must
 const nativeBranding = [
   {
     source: read('src', 'main.ts'),
-    expected: ['Focus ESI-Studio Window', 'About ESI-Studio', "title: 'ESI-Studio'"],
-    forbidden: ['Focus Goose Window', 'About Goose', "title: 'Goose'", 'Goose Failed to Start'],
+    expected: [
+      'Focus ESI-Studio Window',
+      'About ESI-Studio',
+      "title: 'ESI-Studio'",
+      "item.label === 'ESI-Studio'",
+      "dialog.showErrorBox('ESI-Studio Error'",
+    ],
+    forbidden: [
+      'Focus Goose Window',
+      'About Goose',
+      "title: 'Goose'",
+      'Goose Failed to Start',
+      "item.label === 'Goose'",
+      "dialog.showErrorBox('Goose Error'",
+    ],
   },
   {
     source: read('src', 'utils', 'autoUpdater.ts'),
-    expected: ['ESI-Studio.app', 'quit ESI-Studio', 'launch ESI-Studio'],
-    forbidden: ['Goose.app', 'quit Goose', 'launch Goose'],
+    expected: [
+      'ESI-Studio.app',
+      'quit ESI-Studio',
+      'launch ESI-Studio',
+      "setToolTip('ESI-Studio - Update Available')",
+      "setToolTip('ESI-Studio')",
+    ],
+    forbidden: [
+      'Goose.app',
+      'quit Goose',
+      'launch Goose',
+      "setToolTip('Goose - Update Available')",
+      "setToolTip('Goose')",
+    ],
   },
   {
     source: read('src', 'gooseServeLeaseRegistry.ts'),
@@ -237,6 +284,21 @@ const nativeBranding = [
     source: read('src', 'toasts.tsx'),
     expected: ['Ask ESI-Studio'],
     forbidden: ['Ask goose'],
+  },
+  {
+    source: read('src', 'components', 'BaseChat.tsx'),
+    expected: ['aria-label="ESI-Studio"', 'ESI-Studio'],
+    forbidden: ['Goose watermark', '>goose<', 'href="https://goose-docs.ai"'],
+  },
+  {
+    source: read('src', 'acp', 'errors.ts'),
+    expected: ['The connected ESI-Studio server'],
+    forbidden: ['The connected Goose server'],
+  },
+  {
+    source: read('src', 'gooseServe.ts'),
+    expected: ['ESI-Studio backend binary not found'],
+    forbidden: ['Goose binary not found'],
   },
 ];
 

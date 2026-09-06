@@ -1,5 +1,7 @@
 pub use goose_context_management::structured;
 
+pub mod store;
+
 use crate::conversation::message::MessageMetadata;
 use crate::conversation::message::{Message, MessageContent};
 use crate::conversation::{merge_consecutive_messages, Conversation};
@@ -23,6 +25,23 @@ use tracing::log::warn;
 pub use goose_context_management::DEFAULT_COMPACTION_THRESHOLD;
 
 pub(crate) const TOOLCALL_SUMMARIZATION_BATCH_SIZE: usize = 10;
+pub const CONTEXT_ARCHIVE_OPERATION: &str = "esi_context_management";
+
+pub fn context_management_enabled() -> bool {
+    crate::config::extensions::configured_enabled_state(
+        Config::global(),
+        crate::agents::platform_extensions::context_management::EXTENSION_NAME,
+    )
+    .unwrap_or(true)
+}
+
+pub fn is_context_archived(message: &Message) -> bool {
+    message
+        .metadata
+        .operation_note(CONTEXT_ARCHIVE_OPERATION, "archived")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false)
+}
 
 pub(crate) fn tool_pair_summarization_enabled() -> bool {
     Config::global()
@@ -32,16 +51,19 @@ pub(crate) fn tool_pair_summarization_enabled() -> bool {
 
 const CONVERSATION_CONTINUATION_TEXT: &str =
     "Your context was compacted. The previous message contains a summary of the conversation so far.
+Exact earlier evidence remains local; when ESI Context Management tools are enabled, use session_memory search/get only if the summary is insufficient.
 Do not mention that you read a summary or that conversation summarization occurred.
 Just continue the conversation naturally based on the summarized context.";
 
 const TOOL_LOOP_CONTINUATION_TEXT: &str =
     "Your context was compacted. The previous message contains a summary of the conversation so far.
+Exact earlier evidence remains local; when ESI Context Management tools are enabled, use session_memory search/get only if the summary is insufficient.
 Do not mention that you read a summary or that conversation summarization occurred.
 Continue calling tools as necessary to complete the task.";
 
 const MANUAL_COMPACT_CONTINUATION_TEXT: &str =
     "Your context was compacted at the user's request. The previous message contains a summary of the conversation so far.
+Exact earlier evidence remains local; when ESI Context Management tools are enabled, use session_memory search/get only if the summary is insufficient.
 Do not mention that you read a summary or that conversation summarization occurred.
 Just continue the conversation naturally based on the summarized context.";
 
@@ -139,8 +161,22 @@ pub async fn compact_messages(
     // 3. Assistant messages to continue the conversation are also agent_visible but not user_visible
     let mut final_messages = Vec::new();
 
+    let archive_epoch = uuid::Uuid::new_v4().to_string();
     for msg in messages_to_compact {
-        let updated_metadata = msg.metadata.clone().with_agent_invisible();
+        let mut updated_metadata = msg.metadata.clone();
+        if msg.is_agent_visible() && !msg.is_turn_context() {
+            updated_metadata.set_operation_note(
+                CONTEXT_ARCHIVE_OPERATION,
+                "archived",
+                serde_json::json!(true),
+            );
+            updated_metadata.set_operation_note(
+                CONTEXT_ARCHIVE_OPERATION,
+                "epoch",
+                serde_json::json!(archive_epoch),
+            );
+        }
+        let updated_metadata = updated_metadata.with_agent_invisible();
         let updated_msg = msg.clone().with_metadata(updated_metadata);
         final_messages.push(updated_msg);
     }
@@ -228,7 +264,7 @@ pub async fn check_if_compaction_needed(
     threshold_override: Option<f64>,
     session: &crate::session::Session,
 ) -> Result<bool> {
-    if provider.manages_own_context() {
+    if provider.manages_own_context() || !context_management_enabled() {
         return Ok(false);
     }
 
@@ -500,7 +536,10 @@ pub fn maybe_summarize_tool_pairs(
     cutoff: usize,
     protect_last_n: usize,
 ) -> Option<JoinHandle<Vec<(Message, String)>>> {
-    if !tool_pair_summarization_enabled() || provider.manages_own_context() {
+    if !context_management_enabled()
+        || !tool_pair_summarization_enabled()
+        || provider.manages_own_context()
+    {
         return None;
     }
 
@@ -868,12 +907,14 @@ mod tests {
             .find(|message| message.is_user_visible())
             .unwrap();
         assert!(!archived.is_agent_visible());
+        assert!(is_context_archived(archived));
         assert!(archived.as_concat_text().contains("user-only secret"));
         let replay = preserved_copies
             .iter()
             .find(|message| message.is_agent_visible())
             .unwrap();
         assert!(!replay.is_user_visible());
+        assert!(!is_context_archived(replay));
         assert!(replay.as_concat_text().contains("assistant-only preprompt"));
         assert!(!replay.as_concat_text().contains("user-only secret"));
 

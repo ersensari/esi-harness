@@ -1693,8 +1693,9 @@ impl Agent {
                 crate::context_mgmt::compute_tool_call_cutoff(context_limit, compaction_threshold)
             });
         let manages_own_context = provider.manages_own_context();
-        let tool_pair_compaction_enabled =
-            crate::context_mgmt::tool_pair_summarization_enabled() && !manages_own_context;
+        let tool_pair_compaction_enabled = crate::context_mgmt::context_management_enabled()
+            && crate::context_mgmt::tool_pair_summarization_enabled()
+            && !manages_own_context;
 
         let mut operations: Vec<Arc<dyn Operation<Session, GooseEffect> + '_>> = vec![
             Arc::new(SteerOperation::new(steer_queue, self.hook_manager.clone())),
@@ -3405,7 +3406,13 @@ impl Agent {
                             if matching_ids.len() == 2 {
                                 for id in &matching_ids {
                                     session_manager.update_message_metadata(&session_config.id, id, |metadata| {
-                                        metadata.with_agent_invisible()
+                                        let mut metadata = metadata.with_agent_invisible();
+                                        metadata.set_operation_note(
+                                            crate::context_mgmt::CONTEXT_ARCHIVE_OPERATION,
+                                            "archived",
+                                            serde_json::json!(true),
+                                        );
+                                        metadata
                                     }).await?;
                                 }
                                 session_manager.add_message(&session_config.id, &summary_msg).await?;

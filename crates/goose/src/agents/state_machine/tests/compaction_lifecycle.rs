@@ -7,7 +7,9 @@ use super::dummy_api::ProviderFeatures;
 use super::pipeline::{self, test_pipeline, MessageKind::Agent};
 use crate::agents::state_machine;
 use crate::agents::state_machine::ops_compaction::MAX_CONTEXT_ERROR_COMPACTIONS;
-use crate::context_mgmt::{compute_tool_call_cutoff, TOOLCALL_SUMMARIZATION_BATCH_SIZE};
+use crate::context_mgmt::{
+    compute_tool_call_cutoff, is_context_archived, TOOLCALL_SUMMARIZATION_BATCH_SIZE,
+};
 use crate::conversation::message::{Message, MessageErrorKind};
 use crate::conversation::Conversation;
 
@@ -391,9 +393,9 @@ async fn parallel_and_failed_tool_pairs_are_compacted_as_complete_messages() -> 
         })
         .collect::<Vec<_>>();
     assert_eq!(failed_pair.len(), 2);
-    assert!(failed_pair
-        .iter()
-        .all(|message| message.is_user_visible() && !message.is_agent_visible()));
+    assert!(failed_pair.iter().all(|message| message.is_user_visible()
+        && !message.is_agent_visible()
+        && is_context_archived(message)));
     for message in persisted
         .messages()
         .iter()

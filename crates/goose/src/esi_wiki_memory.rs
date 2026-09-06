@@ -82,7 +82,8 @@ fn http_client() -> Result<reqwest::Client, WikiMemoryError> {
 /// that secret for the first time (or refreshes it after expiry) and must
 /// therefore work even when no valid bearer is currently configured.
 fn configured_base_uri() -> Result<String, WikiMemoryError> {
-    let config = get_extension_by_name(WIKI_EXTENSION_NAME).ok_or(WikiMemoryError::NotConfigured)?;
+    let config =
+        get_extension_by_name(WIKI_EXTENSION_NAME).ok_or(WikiMemoryError::NotConfigured)?;
     let uri = match config {
         ExtensionConfig::StreamableHttp { uri, .. } => uri,
         _ => return Err(WikiMemoryError::NotConfigured),
@@ -102,7 +103,8 @@ fn configured_base_uri() -> Result<String, WikiMemoryError> {
 /// `ESI_WIKI_AUTHORIZATION` secret through `Config` (subject to the same
 /// in-process cache/invalidation as every other secret-backed extension).
 async fn resolved_endpoint() -> Result<WikiEndpoint, WikiMemoryError> {
-    let config = get_extension_by_name(WIKI_EXTENSION_NAME).ok_or(WikiMemoryError::NotConfigured)?;
+    let config =
+        get_extension_by_name(WIKI_EXTENSION_NAME).ok_or(WikiMemoryError::NotConfigured)?;
     let resolved = config
         .resolve(Config::global())
         .await
@@ -112,10 +114,7 @@ async fn resolved_endpoint() -> Result<WikiEndpoint, WikiMemoryError> {
             if uri.trim().is_empty() {
                 return Err(WikiMemoryError::NotConfigured);
             }
-            let authorization = headers
-                .get("Authorization")
-                .cloned()
-                .unwrap_or_default();
+            let authorization = headers.get("Authorization").cloned().unwrap_or_default();
             if authorization.is_empty() || authorization.contains("${") {
                 return Err(WikiMemoryError::NotConfigured);
             }
@@ -137,7 +136,11 @@ fn error_message(payload: &Value) -> String {
         .to_string()
 }
 
-async fn call_once(endpoint: &WikiEndpoint, name: &str, arguments: Value) -> Result<Value, WikiMemoryError> {
+async fn call_once(
+    endpoint: &WikiEndpoint,
+    name: &str,
+    arguments: Value,
+) -> Result<Value, WikiMemoryError> {
     let client = http_client()?;
     let body = json!({
         "jsonrpc": "2.0",

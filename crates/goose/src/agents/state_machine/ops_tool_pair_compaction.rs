@@ -11,7 +11,7 @@ use crate::agents::state_machine::{
     applied, messages_since_kickoff, not_applicable, ConversationEffect, Emitter, GooseEffect,
     Operation, OperationResult,
 };
-use crate::context_mgmt::{summarize_tool_call, tool_ids_to_summarize};
+use crate::context_mgmt::{summarize_tool_call, tool_ids_to_summarize, CONTEXT_ARCHIVE_OPERATION};
 use crate::conversation::message::MessageContent;
 use crate::conversation::Conversation;
 use crate::providers::base::Provider;
@@ -146,6 +146,15 @@ impl Operation<Session, GooseEffect> for ToolPairCompactionOperation {
                     continue;
                 };
                 hidden_messages.insert(message_id.clone());
+                effects.push(
+                    ConversationEffect::SetMessageOperationNote {
+                        message_id: message_id.clone(),
+                        operation: CONTEXT_ARCHIVE_OPERATION.to_string(),
+                        key: "archived".to_string(),
+                        value: serde_json::json!(true),
+                    }
+                    .into(),
+                );
                 effects.push(
                     ConversationEffect::SetMessageVisibility {
                         message_id,

@@ -1,6 +1,6 @@
 ---
 name: esi-local-development
-description: Execute software-development work with normal Goose tools while the local ESI controller enforces workspace plan approval, worktree binding, deterministic validation, repair budgets, resume state, and human gates.
+description: Execute software-development work with normal ESI-Studio tools while the local ESI controller enforces workspace plan approval, worktree binding, deterministic validation, repair budgets, resume state, and human gates.
 ---
 
 Use this skill for writable software-development tasks managed by ESI-Studio.
@@ -46,7 +46,7 @@ The workspace plan persists at `.esi/workspace-plan.json`. When a new chat opens
 
 ## Authority boundary
 
-- Use normal Goose reasoning, file, shell, search, and review tools for engineering work.
+- Use normal ESI-Studio reasoning, file, shell, search, and review tools for engineering work.
 - Treat the local ESI development controller as the only authority for stages, validation evidence, failure routing, repair budgets, persisted state, and approvals.
 - Never invent, skip, or rewrite a controller transition or event.
 - Never approve worktree readiness, plan approval, extra repairs, completion, or abandonment yourself.
@@ -60,7 +60,7 @@ The workspace plan persists at `.esi/workspace-plan.json`. When a new chat opens
 2. Turn the user's objective and observable acceptance criteria into the `brief`.
 3. Produce a bounded implementation plan and repository-native validation commands in this order: scope, syntax, static policy, lint/type/build, targeted tests, broader tests.
 4. Wait for the controller's exact human-approved `worktree_ready` binding. Perform writable work only in that ESI-managed worktree.
-5. During `implement` or `repair`, use normal Goose tools and keep changes limited to the approved brief and plan.
+5. During `implement` or `repair`, use normal ESI-Studio tools and keep changes limited to the approved brief and plan.
 6. Ask the controller to run `deterministic_validate`; do not substitute your own success claim for its evidence.
 7. At `diagnose`, use the controller's normalized failure fingerprint and category. Repair only when the controller routes to `repair`.
 8. At `human_gate`, stop modifying files and present the pending fingerprint, exhausted budget, or abandonment request to the user.
@@ -68,3 +68,17 @@ The workspace plan persists at `.esi/workspace-plan.json`. When a new chat opens
 10. At `completion_gate`, stop modifying files. Completion requires explicit human approval for the exact validated snapshot.
 
 On resume, load the controller-owned state and events, confirm the worktree binding, and continue only from the persisted current stage.
+
+## Automatic workspace visualizer
+
+- At the start of a workspace-bound development chat, call
+  `esi-development-visualizer__show_development_loop` with `workspace_path` set
+  to the canonical working directory. Do not ask the user to locate a state
+  file.
+- Refresh the visualizer after plan approval or revision, deterministic
+  validation, repair routing, and completion/abandonment gates.
+- The visualizer discovers controller state automatically. When no controller
+  state exists it labels its result `live_workspace`; treat that as a
+  read-only repository snapshot, never as invented controller evidence.
+- File tree, file content, Git diff, and canvas interactions remain read-only.
+  They do not satisfy validation or approval requirements.

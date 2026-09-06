@@ -381,7 +381,8 @@ async fn clean_team_install_completes_local_workflow_without_private_services() 
     assert!(server_info.capabilities.tools.is_some());
     let tool_result = visualizer
         .show_development_loop(Parameters(ShowDevelopmentLoopParams {
-            state_path: state_path.clone(),
+            workspace_path: None,
+            state_path: Some(state_path.clone()),
         }))
         .await
         .unwrap();
@@ -401,7 +402,9 @@ async fn clean_team_install_completes_local_workflow_without_private_services() 
     );
     assert_eq!(MCP_APPS_MIME_TYPE, "text/html;profile=mcp-app");
     assert!(app_html().contains("ui/notifications/tool-result"));
-    assert!(!app_html().contains("tools/call"));
+    assert!(app_html().contains("tools/call"));
+    assert!(app_html().contains("File content"));
+    assert!(app_html().contains("Workspace canvas"));
 
     git(&worktree, &["add", "implementation.sh"]);
     git(&worktree, &["commit", "-m", "Implement fixture change"]);

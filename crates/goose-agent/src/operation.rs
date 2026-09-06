@@ -211,6 +211,12 @@ pub enum ConversationEffect {
         user_visible: bool,
         agent_visible: bool,
     },
+    SetMessageOperationNote {
+        message_id: String,
+        operation: String,
+        key: String,
+        value: serde_json::Value,
+    },
 }
 
 impl MachineEffect for ConversationEffect {

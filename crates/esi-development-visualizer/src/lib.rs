@@ -3,6 +3,7 @@ use esi_development::{
     ValidationOutcome,
 };
 use esi_workspace_plan::{PlannedTaskStatus, Priority, WorkspacePlan, WorkspacePlanStatus};
+use ignore::WalkBuilder;
 use rmcp::{
     handler::server::{router::tool::ToolRouter, wrapper::Parameters},
     model::{
@@ -17,11 +18,57 @@ use rmcp::{
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::collections::{BTreeMap, BTreeSet};
+use std::ffi::OsStr;
+use std::fs;
+use std::path::{Component, Path, PathBuf};
+use std::process::Command;
+use std::time::SystemTime;
 
 pub const DEVELOPMENT_LOOP_RESOURCE_URI: &str = "ui://esi-development/run";
 pub const MCP_APPS_MIME_TYPE: &str = "text/html;profile=mcp-app";
+const MAX_TREE_ENTRIES: usize = 2_000;
+const MAX_TREE_DEPTH: usize = 16;
+const MAX_FILE_BYTES: usize = 512 * 1024;
+const MAX_DIFF_BYTES: usize = 768 * 1024;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct WorkspaceFileEntryView {
+    pub path: String,
+    pub kind: String,
+    pub size: u64,
+    pub changed: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct WorkspaceSnapshotView {
+    pub root: String,
+    pub branch: Option<String>,
+    pub head: Option<String>,
+    pub dirty: bool,
+    pub changed_files: Vec<String>,
+    pub files: Vec<WorkspaceFileEntryView>,
+    pub tree_truncated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct WorkspaceFileView {
+    pub workspace_root: String,
+    pub path: String,
+    pub language: String,
+    pub content: String,
+    pub bytes: usize,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
+pub struct WorkspaceDiffView {
+    pub workspace_root: String,
+    pub path: Option<String>,
+    pub diff: String,
+    pub bytes: usize,
+    pub truncated: bool,
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
@@ -146,6 +193,7 @@ pub struct WorkspacePlanView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct DevelopmentLoopView {
+    pub source: String,
     pub status: VisualizerStatus,
     pub run_id: Option<String>,
     pub objective: Option<String>,
@@ -158,6 +206,7 @@ pub struct DevelopmentLoopView {
     pub repair_budgets: Vec<RepairBudgetView>,
     pub approvals: Vec<ApprovalView>,
     pub events: Vec<EventView>,
+    pub workspace: Option<WorkspaceSnapshotView>,
 }
 
 #[derive(Clone, Default)]
@@ -170,6 +219,7 @@ struct FingerprintDetails {
 impl DevelopmentLoopView {
     pub fn empty() -> Self {
         Self {
+            source: "empty".to_string(),
             status: VisualizerStatus::Empty,
             run_id: None,
             objective: None,
@@ -182,11 +232,53 @@ impl DevelopmentLoopView {
             repair_budgets: Vec::new(),
             approvals: Vec::new(),
             events: Vec::new(),
+            workspace: None,
         }
     }
 
     pub fn load(path: impl Into<PathBuf>) -> Result<Self, esi_development::DevelopmentError> {
         DevelopmentState::load(path.into()).map(|state| Self::from_state(&state))
+    }
+
+    pub fn from_workspace(path: impl AsRef<Path>) -> Result<Self, String> {
+        let workspace = canonical_workspace(path.as_ref())?;
+        let plan = match WorkspacePlan::load(&workspace) {
+            Ok(Some(plan)) => WorkspacePlanView::from_plan(&plan),
+            Ok(None) => WorkspacePlanView::missing(),
+            Err(error) => WorkspacePlanView::invalid(&error),
+        };
+        let status = if plan.implementation_allowed {
+            VisualizerStatus::Running
+        } else {
+            VisualizerStatus::Blocked
+        };
+        let current_stage = Some(
+            if plan.implementation_allowed {
+                "workspace_ready"
+            } else {
+                "workspace_plan"
+            }
+            .to_string(),
+        );
+        let objective = plan.title.clone();
+        let workspace_snapshot = inspect_workspace(&workspace)?;
+
+        Ok(Self {
+            source: "live_workspace".to_string(),
+            status,
+            run_id: None,
+            objective,
+            current_stage,
+            workspace_plan: plan,
+            stage_history: Vec::new(),
+            worktree: None,
+            validation_evidence: Vec::new(),
+            fingerprints: Vec::new(),
+            repair_budgets: Vec::new(),
+            approvals: Vec::new(),
+            events: Vec::new(),
+            workspace: Some(workspace_snapshot),
+        })
     }
 
     pub fn from_state(state: &DevelopmentState) -> Self {
@@ -299,7 +391,11 @@ impl DevelopmentLoopView {
             })
             .collect();
 
+        let workspace = state
+            .worktree()
+            .and_then(|binding| inspect_workspace(&binding.identity.worktree_path).ok());
         Self {
+            source: "controller_state".to_string(),
             status,
             run_id: Some(state.run_id().to_string()),
             objective: state.brief().map(|brief| brief.objective.clone()),
@@ -312,6 +408,7 @@ impl DevelopmentLoopView {
             repair_budgets,
             approvals,
             events,
+            workspace,
         }
     }
 }
@@ -397,6 +494,339 @@ fn workspace_plan_view(state: &DevelopmentState) -> WorkspacePlanView {
         Ok(None) => WorkspacePlanView::missing(),
         Err(error) => WorkspacePlanView::invalid(&error),
     }
+}
+
+fn canonical_workspace(path: &Path) -> Result<PathBuf, String> {
+    let canonical = path
+        .canonicalize()
+        .map_err(|error| format!("Cannot resolve workspace {}: {error}", path.display()))?;
+    if !canonical.is_dir() {
+        return Err(format!(
+            "Workspace is not a directory: {}",
+            canonical.display()
+        ));
+    }
+    Ok(canonical)
+}
+
+fn normalize_relative_path(path: &Path) -> Result<PathBuf, String> {
+    if path.as_os_str().is_empty() || path.is_absolute() {
+        return Err("File path must be a non-empty workspace-relative path".to_string());
+    }
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(value) => normalized.push(value),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err("File path cannot escape the workspace".to_string());
+            }
+        }
+    }
+    if normalized.as_os_str().is_empty() {
+        return Err("File path must name a file".to_string());
+    }
+    Ok(normalized)
+}
+
+fn resolve_workspace_file(workspace: &Path, relative: &Path) -> Result<(PathBuf, PathBuf), String> {
+    let root = canonical_workspace(workspace)?;
+    let relative = normalize_relative_path(relative)?;
+    let candidate = root.join(&relative);
+    let canonical = candidate
+        .canonicalize()
+        .map_err(|error| format!("Cannot resolve {}: {error}", relative.display()))?;
+    if !canonical.starts_with(&root) {
+        return Err(format!(
+            "File resolves outside the workspace: {}",
+            relative.display()
+        ));
+    }
+    if !canonical.is_file() {
+        return Err(format!("Not a regular file: {}", relative.display()));
+    }
+    Ok((root, relative))
+}
+
+fn relative_string(path: &Path) -> String {
+    path.components()
+        .map(|component| component.as_os_str().to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+fn ignored_directory(entry: &ignore::DirEntry) -> bool {
+    entry.depth() > 0
+        && entry.file_type().is_some_and(|kind| kind.is_dir())
+        && matches!(
+            entry.file_name().to_str(),
+            Some(".git" | "node_modules" | "target" | ".venv" | "venv" | "__pycache__")
+        )
+}
+
+fn git_output(workspace: &Path, arguments: &[&OsStr]) -> Result<Vec<u8>, String> {
+    let output = Command::new("git")
+        .arg("--no-pager")
+        .arg("-C")
+        .arg(workspace)
+        .arg("--literal-pathspecs")
+        .args(arguments)
+        .output()
+        .map_err(|error| format!("Cannot execute git: {error}"))?;
+    if output.status.success() {
+        Ok(output.stdout)
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).trim().to_string())
+    }
+}
+
+fn git_text(workspace: &Path, arguments: &[&str]) -> Option<String> {
+    let args = arguments.iter().map(OsStr::new).collect::<Vec<_>>();
+    git_output(workspace, &args)
+        .ok()
+        .map(|bytes| String::from_utf8_lossy(&bytes).trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn git_changed_files(workspace: &Path) -> Vec<String> {
+    let arguments = [
+        OsStr::new("status"),
+        OsStr::new("--porcelain=v1"),
+        OsStr::new("--untracked-files=all"),
+    ];
+    let Ok(output) = git_output(workspace, &arguments) else {
+        return Vec::new();
+    };
+    let status = String::from_utf8_lossy(&output);
+    let mut files = BTreeSet::new();
+    for line in status.lines() {
+        let Some(raw) = line.get(3..) else {
+            continue;
+        };
+        let path = raw.rsplit(" -> ").next().unwrap_or(raw).trim_matches('"');
+        if !path.is_empty() {
+            files.insert(path.to_string());
+        }
+    }
+    files.into_iter().collect()
+}
+
+pub fn inspect_workspace(path: impl AsRef<Path>) -> Result<WorkspaceSnapshotView, String> {
+    let root = canonical_workspace(path.as_ref())?;
+    let changed_files = git_changed_files(&root);
+    let changed = changed_files.iter().cloned().collect::<BTreeSet<_>>();
+    let mut files = Vec::new();
+    let mut tree_truncated = false;
+    let walker = WalkBuilder::new(&root)
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .follow_links(false)
+        .max_depth(Some(MAX_TREE_DEPTH))
+        .filter_entry(|entry| !ignored_directory(entry))
+        .build();
+
+    for entry in walker.skip(1) {
+        let entry = entry.map_err(|error| format!("Cannot inspect workspace tree: {error}"))?;
+        if files.len() == MAX_TREE_ENTRIES {
+            tree_truncated = true;
+            break;
+        }
+        let Ok(relative) = entry.path().strip_prefix(&root) else {
+            continue;
+        };
+        let path = relative_string(relative);
+        let metadata = entry
+            .metadata()
+            .map_err(|error| format!("Cannot inspect {path}: {error}"))?;
+        let kind = if metadata.is_dir() {
+            "directory"
+        } else if metadata.is_file() {
+            "file"
+        } else if metadata.file_type().is_symlink() {
+            "symlink"
+        } else {
+            "other"
+        };
+        let entry_changed = changed.contains(&path)
+            || changed
+                .iter()
+                .any(|changed_path| changed_path.starts_with(&format!("{path}/")));
+        files.push(WorkspaceFileEntryView {
+            path,
+            kind: kind.to_string(),
+            size: if metadata.is_file() {
+                metadata.len()
+            } else {
+                0
+            },
+            changed: entry_changed,
+        });
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+
+    Ok(WorkspaceSnapshotView {
+        root: root.to_string_lossy().into_owned(),
+        branch: git_text(&root, &["branch", "--show-current"]),
+        head: git_text(&root, &["rev-parse", "--short=12", "HEAD"]),
+        dirty: !changed_files.is_empty(),
+        changed_files,
+        files,
+        tree_truncated,
+    })
+}
+
+pub fn read_workspace_file(
+    workspace: impl AsRef<Path>,
+    path: impl AsRef<Path>,
+) -> Result<WorkspaceFileView, String> {
+    let (root, relative) = resolve_workspace_file(workspace.as_ref(), path.as_ref())?;
+    let bytes = fs::read(root.join(&relative))
+        .map_err(|error| format!("Cannot read {}: {error}", relative.display()))?;
+    if bytes.iter().take(MAX_FILE_BYTES).any(|byte| *byte == 0) {
+        return Err(format!(
+            "Binary file preview is not supported: {}",
+            relative.display()
+        ));
+    }
+    let truncated = bytes.len() > MAX_FILE_BYTES;
+    let content = String::from_utf8_lossy(&bytes[..bytes.len().min(MAX_FILE_BYTES)]).into_owned();
+    Ok(WorkspaceFileView {
+        workspace_root: root.to_string_lossy().into_owned(),
+        path: relative_string(&relative),
+        language: language_for_path(&relative).to_string(),
+        content,
+        bytes: bytes.len(),
+        truncated,
+    })
+}
+
+fn language_for_path(path: &Path) -> &'static str {
+    match path.extension().and_then(OsStr::to_str).unwrap_or_default() {
+        "rs" => "rust",
+        "ts" | "tsx" => "typescript",
+        "js" | "jsx" | "mjs" | "cjs" => "javascript",
+        "py" => "python",
+        "go" => "go",
+        "java" => "java",
+        "kt" | "kts" => "kotlin",
+        "cs" => "csharp",
+        "c" | "h" => "c",
+        "cc" | "cpp" | "cxx" | "hpp" => "cpp",
+        "html" | "htm" => "html",
+        "css" | "scss" => "css",
+        "json" => "json",
+        "toml" => "toml",
+        "yaml" | "yml" => "yaml",
+        "md" => "markdown",
+        "sh" | "bash" => "shell",
+        "sql" => "sql",
+        _ => "text",
+    }
+}
+
+fn truncate_utf8(bytes: Vec<u8>, limit: usize) -> (String, bool) {
+    let truncated = bytes.len() > limit;
+    let mut end = bytes.len().min(limit);
+    while end > 0 && std::str::from_utf8(&bytes[..end]).is_err() {
+        end -= 1;
+    }
+    (
+        String::from_utf8_lossy(&bytes[..end]).into_owned(),
+        truncated,
+    )
+}
+
+fn untracked_file_diff(root: &Path, relative: &Path) -> Result<String, String> {
+    let file = read_workspace_file(root, relative)?;
+    let line_count = file.content.lines().count();
+    let mut diff = format!(
+        "diff --git a/{0} b/{0}\nnew file mode 100644\n--- /dev/null\n+++ b/{0}\n@@ -0,0 +1,{line_count} @@\n",
+        file.path
+    );
+    for line in file.content.lines() {
+        diff.push('+');
+        diff.push_str(line);
+        diff.push('\n');
+    }
+    if file.truncated {
+        diff.push_str("+... preview truncated ...\n");
+    }
+    Ok(diff)
+}
+
+pub fn read_workspace_diff(
+    workspace: impl AsRef<Path>,
+    path: Option<impl AsRef<Path>>,
+) -> Result<WorkspaceDiffView, String> {
+    let root = canonical_workspace(workspace.as_ref())?;
+    let relative = path
+        .map(|path| normalize_relative_path(path.as_ref()))
+        .transpose()?;
+    if let Some(relative) = &relative {
+        resolve_workspace_file(&root, relative)?;
+    }
+
+    let mut arguments = vec![
+        OsStr::new("diff"),
+        OsStr::new("--no-ext-diff"),
+        OsStr::new("--no-color"),
+        OsStr::new("--unified=3"),
+        OsStr::new("HEAD"),
+        OsStr::new("--"),
+    ];
+    if let Some(relative) = &relative {
+        arguments.push(relative.as_os_str());
+    }
+    let mut bytes = git_output(&root, &arguments).unwrap_or_default();
+    if bytes.is_empty() {
+        if let Some(relative) = &relative {
+            let relative_text = relative_string(relative);
+            if git_changed_files(&root).contains(&relative_text) {
+                bytes = untracked_file_diff(&root, relative)?.into_bytes();
+            }
+        }
+    }
+    let original_bytes = bytes.len();
+    let (diff, truncated) = truncate_utf8(bytes, MAX_DIFF_BYTES);
+    Ok(WorkspaceDiffView {
+        workspace_root: root.to_string_lossy().into_owned(),
+        path: relative.as_deref().map(relative_string),
+        diff,
+        bytes: original_bytes,
+        truncated,
+    })
+}
+
+fn discover_controller_state(workspace: &Path) -> Option<PathBuf> {
+    let esi = workspace.join(".esi");
+    let fixed = [
+        esi.join("development-state.json"),
+        esi.join("development").join("state.json"),
+    ];
+    for candidate in fixed {
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    let runs = esi.join("development-runs");
+    let mut candidates = fs::read_dir(runs)
+        .ok()?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(OsStr::to_str) == Some("json"))
+        .filter_map(|path| {
+            let modified = path
+                .metadata()
+                .ok()?
+                .modified()
+                .unwrap_or(SystemTime::UNIX_EPOCH);
+            Some((modified, path))
+        })
+        .collect::<Vec<_>>();
+    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.0));
+    candidates.into_iter().next().map(|(_, path)| path)
 }
 
 fn workspace_plan_status_name(status: WorkspacePlanStatus) -> &'static str {
@@ -665,9 +1095,32 @@ fn ui_resource_meta() -> MetaObject {
     meta
 }
 
+fn app_only_meta() -> MetaObject {
+    let mut meta = MetaObject::new();
+    meta.0
+        .insert("ui".to_string(), json!({ "visibility": ["app"] }));
+    meta
+}
+
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ShowDevelopmentLoopParams {
-    pub state_path: PathBuf,
+    #[serde(default)]
+    pub workspace_path: Option<PathBuf>,
+    #[serde(default)]
+    pub state_path: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReadWorkspaceFileParams {
+    pub workspace_path: PathBuf,
+    pub path: PathBuf,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+pub struct ReadWorkspaceDiffParams {
+    pub workspace_path: PathBuf,
+    #[serde(default)]
+    pub path: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -695,7 +1148,7 @@ impl ServerHandler for DevelopmentVisualizerServer {
             env!("CARGO_PKG_VERSION"),
         ))
         .with_instructions(
-            "Display persisted ESI development controller state. This server is read-only and has no workflow transition tools.",
+            "Display ESI development controller state or an automatic live workspace snapshot. This server is read-only and has no workflow transition or file mutation tools.",
         )
     }
 
@@ -764,20 +1217,38 @@ impl DevelopmentVisualizerServer {
 
     #[tool(
         name = "show_development_loop",
-        description = "Render a read-only ESI development run from its persisted controller state file",
+        description = "Render a read-only ESI workspace. Prefer workspace_path; persisted controller state is discovered automatically when available. state_path remains available for explicit compatibility.",
         meta = ui_resource_meta()
     )]
     pub async fn show_development_loop(
         &self,
         Parameters(params): Parameters<ShowDevelopmentLoopParams>,
     ) -> Result<CallToolResult, ErrorData> {
-        let view = DevelopmentLoopView::load(&params.state_path).map_err(|error| {
-            ErrorData::new(
-                ErrorCode::INVALID_PARAMS,
-                format!("Cannot load ESI development state: {error}"),
-                None,
-            )
-        })?;
+        let view = match (params.workspace_path, params.state_path) {
+            (Some(workspace), explicit_state) => {
+                let root = canonical_workspace(&workspace).map_err(invalid_params)?;
+                let state_path = explicit_state.or_else(|| discover_controller_state(&root));
+                if let Some(state_path) = state_path {
+                    let mut view = DevelopmentLoopView::load(&state_path).map_err(|error| {
+                        invalid_params(format!("Cannot load ESI development state: {error}"))
+                    })?;
+                    view.workspace = Some(inspect_workspace(&root).map_err(invalid_params)?);
+                    view
+                } else {
+                    DevelopmentLoopView::from_workspace(&root).map_err(invalid_params)?
+                }
+            }
+            (None, Some(state_path)) => {
+                DevelopmentLoopView::load(&state_path).map_err(|error| {
+                    invalid_params(format!("Cannot load ESI development state: {error}"))
+                })?
+            }
+            (None, None) => {
+                return Err(invalid_params(
+                    "workspace_path or state_path is required".to_string(),
+                ));
+            }
+        };
         let structured = serde_json::to_value(&view).map_err(|error| {
             ErrorData::new(
                 ErrorCode::INTERNAL_ERROR,
@@ -797,4 +1268,52 @@ impl DevelopmentVisualizerServer {
         ))];
         Ok(result.with_meta(Some(ui_resource_meta())))
     }
+
+    #[tool(
+        name = "read_workspace_file",
+        description = "Read a bounded UTF-8 file preview inside the visualized workspace",
+        meta = app_only_meta()
+    )]
+    pub async fn read_workspace_file_tool(
+        &self,
+        Parameters(params): Parameters<ReadWorkspaceFileParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let file =
+            read_workspace_file(params.workspace_path, params.path).map_err(invalid_params)?;
+        structured_result(file, "Workspace file loaded")
+    }
+
+    #[tool(
+        name = "read_workspace_diff",
+        description = "Read a bounded Git diff inside the visualized workspace",
+        meta = app_only_meta()
+    )]
+    pub async fn read_workspace_diff_tool(
+        &self,
+        Parameters(params): Parameters<ReadWorkspaceDiffParams>,
+    ) -> Result<CallToolResult, ErrorData> {
+        let diff =
+            read_workspace_diff(params.workspace_path, params.path).map_err(invalid_params)?;
+        structured_result(diff, "Workspace diff loaded")
+    }
+}
+
+fn invalid_params(message: String) -> ErrorData {
+    ErrorData::new(ErrorCode::INVALID_PARAMS, message, None)
+}
+
+fn structured_result<T: Serialize>(
+    value: T,
+    message: &'static str,
+) -> Result<CallToolResult, ErrorData> {
+    let structured = serde_json::to_value(value).map_err(|error| {
+        ErrorData::new(
+            ErrorCode::INTERNAL_ERROR,
+            format!("Cannot serialize visualizer response: {error}"),
+            None,
+        )
+    })?;
+    let mut result = CallToolResult::structured(structured);
+    result.content = vec![ContentBlock::text(message)];
+    Ok(result.with_meta(Some(app_only_meta())))
 }

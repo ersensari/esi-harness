@@ -12,7 +12,7 @@ use crate::agents::state_machine::{
     yielded_with, ConversationEffect, Emitter, GooseEffect, Operation, OperationResult,
     SlashCommand,
 };
-use crate::context_mgmt::compact_messages;
+use crate::context_mgmt::{compact_messages, context_management_enabled};
 use crate::conversation::message::{Message, MessageErrorKind, SystemNotificationType};
 use crate::conversation::{Conversation, EffectiveRole};
 use crate::providers::base::Provider;
@@ -197,7 +197,7 @@ impl Operation<Session, GooseEffect> for CompactionOperation {
         session: &Session,
         _conversation: &Conversation,
     ) -> Result<Vec<String>> {
-        if self.manages_own_context {
+        if self.manages_own_context || !context_management_enabled() {
             return Ok(Vec::new());
         }
         Ok(compaction_part(
@@ -237,6 +237,9 @@ impl Operation<Session, GooseEffect> for CompactionOperation {
                 return not_applicable();
             }
         } else {
+            if !context_management_enabled() {
+                return not_applicable();
+            }
             if last_effective_role(messages)? != EffectiveRole::User {
                 return not_applicable();
             }

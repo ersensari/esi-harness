@@ -100,6 +100,15 @@ Use write and edit to efficiently make changes. Test and verify as appropriate.
 
 When running Python scripts or commands, always use `python3` instead of `python`.
 
+## esi_context_management
+
+### Instructions
+ESI Context Management keeps compacted conversation evidence in the
+current session's local Harness database. Search it when a compacted
+handoff lacks an earlier decision, path, command, error, or result.
+Handoff output is local and provider-neutral; publish it elsewhere only
+after the user explicitly asks and through that destination's own tool.
+
 ## orchestrator
 
 ### Instructions
@@ -114,9 +123,7 @@ Create, list, update, pause, resume, and remove scheduled recipe runs, and inspe
 
 
 You have these skills at your disposal, when it is clear they can help you solve a problem or you are asked to use them:
-• esi-local-development - Execute software-development work with normal Goose tools while the local ESI controller enforces workspace plan approval, worktree binding, deterministic validation, repair budgets, resume state, and human gates.
-• goose-doc-guide - Reference goose documentation to create, configure, or explain goose-specific features like recipes, extensions, sessions, and providers. You MUST read the relevant goose docs before answering. You MUST NOT rely on training data or assumptions for any goose-specific fields, values, names, syntax, or commands.
-• web-search - Search the web and extract page content using DuckDuckGo (no API key required), Tavily, or SearXNG. Use whenever the task needs current information, facts not in training data, or content from a specific URL.
+• esi-local-development - Execute software-development work with normal ESI-Studio tools while the local ESI controller enforces workspace plan approval, worktree binding, deterministic validation, repair budgets, resume state, and human gates.
 ## summarize
 
 

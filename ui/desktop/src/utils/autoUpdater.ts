@@ -766,7 +766,7 @@ function updateTrayIcon(hasUpdate: boolean) {
     } else {
       iconPath = path.join(process.resourcesPath, 'images', 'iconTemplateUpdate.png');
     }
-    trayRef.setToolTip('Goose - Update Available');
+    trayRef.setToolTip('ESI-Studio - Update Available');
   } else {
     // Use normal icon
     if (isDev) {
@@ -774,7 +774,7 @@ function updateTrayIcon(hasUpdate: boolean) {
     } else {
       iconPath = path.join(process.resourcesPath, 'images', 'iconTemplate.png');
     }
-    trayRef.setToolTip('Goose');
+    trayRef.setToolTip('ESI-Studio');
   }
 
   const icon = nativeImage.createFromPath(iconPath);

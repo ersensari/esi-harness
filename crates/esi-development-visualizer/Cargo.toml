@@ -14,6 +14,7 @@ workspace = true
 [dependencies]
 esi-development = { version = "1.48.0", path = "../esi-development" }
 esi-workspace-plan = { version = "1.48.0", path = "../esi-workspace-plan" }
+ignore.workspace = true
 rmcp = { workspace = true, features = ["server", "macros"] }
 schemars.workspace = true
 serde.workspace = true

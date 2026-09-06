@@ -13,7 +13,7 @@ const AUTH_REQUIRED_CODE = -32000;
 const RECIPE_PARAMS_CANCELLED_REASON = 'recipe_params_cancelled';
 
 export const RECIPE_PARAMETER_SCOPES_UNSUPPORTED_MESSAGE =
-  'The connected Goose server does not support securely scoped deeplink recipe parameters. Update the server and try again.';
+  'The connected ESI-Studio server does not support securely scoped deeplink recipe parameters. Update the server and try again.';
 
 export class RecipeParameterScopesUnsupportedError extends Error {
   constructor() {

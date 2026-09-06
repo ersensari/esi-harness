@@ -29,11 +29,11 @@ goose skills are compatible with Claude Desktop and other [agents that support A
 
 ## Built-in Skills
 
-goose ships with a built-in skill that is always available without any installation:
+ESI-Studio ships one built-in skill that is always available without any installation:
 
 | Skill | Description |
 |-------|-------------|
-| `web-search` | Search the web using DuckDuckGo (no API key), Tavily, or SearXNG, and extract page content. |
+| `esi-local-development` | Apply the ESI workspace-plan gate, deterministic development workflow, validation, repair budgets, and human approvals. |
 
 For browser automation — navigating pages, clicking, filling forms, and capturing screenshots — install the upstream-maintained browser-use skill:
 
