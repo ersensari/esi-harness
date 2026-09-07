@@ -4282,6 +4282,7 @@ version = "1.48.0"
 dependencies = [
  "esi-workspace",
  "esi-workspace-plan",
+ "nix",
  "serde",
  "serde_json",
  "sha2 0.11.0",

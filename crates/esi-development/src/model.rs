@@ -167,6 +167,44 @@ pub enum ValidationOutcome {
     Failed,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationTermination {
+    Exited,
+    TimedOut,
+    Cancelled,
+    ProcessError,
+    Unsupported,
+}
+
+#[derive(Clone, Debug)]
+pub struct ValidationControl {
+    pub timeout: std::time::Duration,
+    pub output_limit_bytes: usize,
+    cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Default for ValidationControl {
+    fn default() -> Self {
+        Self {
+            timeout: std::time::Duration::from_secs(300),
+            output_limit_bytes: 16 * 1024,
+            cancelled: Default::default(),
+        }
+    }
+}
+
+impl ValidationControl {
+    pub fn cancel(&self) {
+        self.cancelled
+            .store(true, std::sync::atomic::Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(std::sync::atomic::Ordering::Acquire)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ValidationEvidence {
     pub validator_id: String,
@@ -178,6 +216,12 @@ pub struct ValidationEvidence {
     pub stdout: String,
     pub stderr: String,
     pub failure_fingerprint: Option<FailureFingerprint>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub termination: Option<ValidationTermination>,
+    #[serde(default)]
+    pub stdout_truncated: bool,
+    #[serde(default)]
+    pub stderr_truncated: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

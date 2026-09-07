@@ -132,6 +132,199 @@ fn transition_table_allows_only_declared_edges() {
     }
 }
 
+#[cfg(target_os = "linux")]
+fn lifecycle_fixture(script: &str) -> (TempDir, DevelopmentState, WorktreeInspection) {
+    let directory = TempDir::new().unwrap();
+    let plan = ValidationPlan::new(vec![command(
+        "lifecycle",
+        ValidationCategory::TargetedTests,
+        "sh",
+        &["-c", script],
+    )])
+    .unwrap();
+    let (state, inspection) = ready_state(directory.path(), plan, RepairPolicy::default());
+    (directory, state, inspection)
+}
+
+#[cfg(target_os = "linux")]
+fn assert_descendant_stopped(evidence: &ValidationEvidence) {
+    let pid: u32 = evidence.stdout.trim().parse().unwrap();
+    for _ in 0..100 {
+        match fs::read_to_string(format!("/proc/{pid}/status")) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Ok(status)
+                if status
+                    .lines()
+                    .any(|line| line.starts_with("State:") && line.contains('Z')) =>
+            {
+                return
+            }
+            _ => std::thread::sleep(std::time::Duration::from_millis(10)),
+        }
+    }
+    panic!("owned descendant {pid} is still running");
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn validation_lifecycle_timeout_kills_descendants_and_blocks_review() {
+    let (directory, mut state, inspection) = lifecycle_fixture("sleep 60 & echo $!; wait");
+    let mut control = ValidationControl::default();
+    control.timeout = std::time::Duration::from_millis(150);
+    let start = std::time::Instant::now();
+    let run = state.validate_with_control(&inspection, &control).unwrap();
+    assert!(start.elapsed() < std::time::Duration::from_secs(3));
+    assert!(!run.passed);
+    assert_eq!(
+        run.evidence[0].termination,
+        Some(ValidationTermination::TimedOut)
+    );
+    assert_eq!(state.stage(), DevelopmentStage::Diagnose);
+    assert_descendant_stopped(&run.evidence[0]);
+    let path = directory.path().join("interrupted-state.json");
+    state.save(&path).unwrap();
+    let resumed = DevelopmentState::load(&path).unwrap();
+    assert_eq!(resumed.stage(), DevelopmentStage::Diagnose);
+    assert_eq!(resumed.validation_runs()[0], run);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn validation_lifecycle_cancel_from_another_thread_stops_tree() {
+    let (_directory, mut state, inspection) = lifecycle_fixture("sleep 60 & echo $!; wait");
+    let control = ValidationControl::default();
+    let token = control.clone();
+    let cancel = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(150));
+        token.cancel();
+    });
+    let start = std::time::Instant::now();
+    let run = state.validate_with_control(&inspection, &control).unwrap();
+    cancel.join().unwrap();
+    assert!(start.elapsed() < std::time::Duration::from_secs(3));
+    assert!(!run.passed);
+    assert_eq!(
+        run.evidence[0].termination,
+        Some(ValidationTermination::Cancelled)
+    );
+    assert_eq!(state.stage(), DevelopmentStage::Diagnose);
+    assert_descendant_stopped(&run.evidence[0]);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn validation_lifecycle_success_cleans_background_descendants() {
+    let (_directory, mut state, inspection) = lifecycle_fixture("sleep 60 & echo $!; exit 0");
+    let run = state.validate(&inspection).unwrap();
+    assert!(run.passed);
+    assert_descendant_stopped(&run.evidence[0]);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn validation_lifecycle_drains_both_streams_with_bounded_evidence() {
+    let (_directory, mut state, inspection) =
+        lifecycle_fixture("head -c 200000 /dev/zero & head -c 200000 /dev/zero >&2 & wait");
+    let mut control = ValidationControl::default();
+    control.output_limit_bytes = 1024;
+    let run = state.validate_with_control(&inspection, &control).unwrap();
+    let evidence = &run.evidence[0];
+    assert!(run.passed);
+    assert_eq!(evidence.stdout.len(), 1024);
+    assert_eq!(evidence.stderr.len(), 1024);
+    assert!(evidence.stdout_truncated && evidence.stderr_truncated);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn validation_lifecycle_infinite_output_times_out_without_unbounded_capture() {
+    let (_directory, mut state, inspection) = lifecycle_fixture("cat /dev/zero");
+    let mut control = ValidationControl::default();
+    control.timeout = std::time::Duration::from_millis(100);
+    control.output_limit_bytes = 511;
+    let run = state.validate_with_control(&inspection, &control).unwrap();
+    assert!(!run.passed);
+    assert_eq!(
+        run.evidence[0].termination,
+        Some(ValidationTermination::TimedOut)
+    );
+    assert!(run.evidence[0].stdout.len() <= 511);
+    assert!(run.evidence[0].stdout_truncated);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn validation_lifecycle_precancel_optional_does_not_spawn_or_pass() {
+    let directory = TempDir::new().unwrap();
+    let mut optional = command(
+        "optional",
+        ValidationCategory::Syntax,
+        "sh",
+        &["-c", "touch must-not-exist"],
+    );
+    optional.required = false;
+    let required = command("required", ValidationCategory::TargetedTests, "true", &[]);
+    let plan = ValidationPlan::new(vec![optional, required]).unwrap();
+    let (mut state, inspection) = ready_state(directory.path(), plan, RepairPolicy::default());
+    let control = ValidationControl::default();
+    control.cancel();
+    let run = state.validate_with_control(&inspection, &control).unwrap();
+    assert!(!run.passed);
+    assert_eq!(run.evidence.len(), 1);
+    assert!(!directory.path().join("must-not-exist").exists());
+    assert_eq!(state.stage(), DevelopmentStage::Diagnose);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn validation_lifecycle_utf8_and_legacy_evidence_are_compatible() {
+    let (_directory, mut state, inspection) = lifecycle_fixture("printf '\\377\\377\\377'");
+    let mut control = ValidationControl::default();
+    control.output_limit_bytes = 4;
+    let run = state.validate_with_control(&inspection, &control).unwrap();
+    assert!(run.passed);
+    assert!(run.evidence[0].stdout.len() <= 4);
+    let mut json = serde_json::to_value(&run.evidence[0]).unwrap();
+    for key in ["termination", "stdout_truncated", "stderr_truncated"] {
+        json.as_object_mut().unwrap().remove(key);
+    }
+    let old: ValidationEvidence = serde_json::from_value(json).unwrap();
+    assert_eq!(old.termination, None);
+    assert!(!old.stdout_truncated);
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn validation_lifecycle_invalid_controls_leave_state_unchanged() {
+    let (_directory, mut state, inspection) = lifecycle_fixture("exit 0");
+    let mut control = ValidationControl::default();
+    control.timeout = std::time::Duration::ZERO;
+    assert!(state.validate_with_control(&inspection, &control).is_err());
+    assert_eq!(state.stage(), DevelopmentStage::Implement);
+    assert!(state.validation_runs().is_empty());
+}
+
+#[test]
+#[cfg(target_os = "linux")]
+fn validation_lifecycle_spawn_failure_is_typed_and_cannot_open_review() {
+    let directory = TempDir::new().unwrap();
+    let plan = ValidationPlan::new(vec![command(
+        "missing",
+        ValidationCategory::TargetedTests,
+        "/nonexistent/esi-validation-fixture",
+        &[],
+    )])
+    .unwrap();
+    let (mut state, inspection) = ready_state(directory.path(), plan, RepairPolicy::default());
+    let run = state.validate(&inspection).unwrap();
+    assert!(!run.passed);
+    assert_eq!(
+        run.evidence[0].termination,
+        Some(ValidationTermination::ProcessError)
+    );
+    assert_eq!(state.stage(), DevelopmentStage::Diagnose);
+}
+
 #[test]
 fn invalid_transition_cannot_skip_worktree_or_validation() {
     let mut state = DevelopmentState::new("run-1", RepairPolicy::default()).unwrap();

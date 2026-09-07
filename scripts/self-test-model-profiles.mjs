@@ -15,6 +15,7 @@ const phaseTitles = {
   'state-concurrency': 'ESI State Concurrency',
   'tool-authority': 'ESI Required Authority Gates',
   'extension-trust': 'Extension Trust regression',
+  'validation-lifecycle': 'ESI Validation Lifecycle',
 };
 assert(Object.hasOwn(phaseTitles, phase));
 const phaseTitle = phaseTitles[phase];
@@ -23,7 +24,11 @@ const root = await mkdtemp(join(tmpdir(), 'forgeloop-ai-profile-selftest-'));
 const artifacts = join(root, 'artifacts');
 await mkdir(artifacts);
 await mkdir(join(root, 'config/custom_providers'), { recursive: true });
-const commands = phase === 'extension-trust' ? [
+const commands = phase === 'validation-lifecycle' ? [
+  'node scripts/test-isolated.mjs cargo test --locked -p esi-development -- --quiet',
+  'node scripts/test-isolated.mjs cargo test --locked -p esi-development-visualizer -- --quiet',
+  'node scripts/test-isolated.mjs cargo test --locked -p esi-development --test workflow validation_lifecycle -- --test-threads=1',
+] : phase === 'extension-trust' ? [
   'node scripts/test-isolated.mjs cargo test --locked --release -p goose --lib extension_trust -- --quiet',
   'node scripts/test-isolated.mjs cargo test --locked --release -p goose --lib authority_ -- --quiet',
   'node scripts/test-isolated.mjs cargo test --locked --release -p goose --lib workspace_plan -- --quiet',

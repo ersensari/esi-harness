@@ -3,7 +3,6 @@ use esi_workspace::{LifecycleState, WorktreeInspection};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 use std::path::Path;
-use std::process::Command;
 
 const MAX_EVIDENCE_BYTES: usize = 16 * 1024;
 
@@ -233,6 +232,23 @@ impl DevelopmentState {
         &mut self,
         inspection: &WorktreeInspection,
     ) -> Result<ValidationRun, DevelopmentError> {
+        self.validate_with_control(inspection, &ValidationControl::default())
+    }
+
+    pub fn validate_with_control(
+        &mut self,
+        inspection: &WorktreeInspection,
+        control: &ValidationControl,
+    ) -> Result<ValidationRun, DevelopmentError> {
+        if control.timeout.is_zero()
+            || control.output_limit_bytes == 0
+            || control.output_limit_bytes > 16 * 1024 * 1024
+        {
+            return Err(DevelopmentError::InvalidInput(
+                "validation requires a positive timeout and 1..=16777216 retained bytes per stream"
+                    .into(),
+            ));
+        }
         if !matches!(
             self.stage,
             DevelopmentStage::Implement | DevelopmentStage::Repair
@@ -252,8 +268,11 @@ impl DevelopmentState {
         let mut evidence = Vec::new();
         let mut required_failure = None;
         for validator in &commands {
-            let item = execute_validator(validator, inspection);
-            if validator.required && item.outcome == ValidationOutcome::Failed {
+            let item = execute_validator(validator, inspection, control);
+            if item.outcome == ValidationOutcome::Failed
+                && (validator.required
+                    || item.termination == Some(ValidationTermination::Cancelled))
+            {
                 required_failure = Some(failure_from_evidence(&item));
             }
             evidence.push(item);
@@ -704,32 +723,35 @@ impl DevelopmentState {
 fn execute_validator(
     validator: &ValidationCommand,
     inspection: &WorktreeInspection,
+    control: &ValidationControl,
 ) -> ValidationEvidence {
     let mut command_line = vec![validator.program.clone()];
     command_line.extend(validator.arguments.clone());
-    let output = Command::new(&validator.program)
-        .args(&validator.arguments)
-        .current_dir(&inspection.record.identity.worktree_path)
-        .output();
-    let (outcome, exit_code, stdout, stderr, failure_category) = match output {
-        Ok(output) => (
-            if output.status.success() {
-                ValidationOutcome::Passed
-            } else {
-                ValidationOutcome::Failed
-            },
-            output.status.code(),
-            bounded(&String::from_utf8_lossy(&output.stdout)),
-            bounded(&String::from_utf8_lossy(&output.stderr)),
-            FailureCategory::from(validator.category),
-        ),
-        Err(error) => (
-            ValidationOutcome::Failed,
-            None,
-            String::new(),
-            bounded(&error.to_string()),
-            FailureCategory::Environment,
-        ),
+    let output = crate::validation::execute(
+        validator,
+        &inspection.record.identity.worktree_path,
+        control,
+    );
+    let outcome =
+        if output.termination == ValidationTermination::Exited && output.exit_code == Some(0) {
+            ValidationOutcome::Passed
+        } else {
+            ValidationOutcome::Failed
+        };
+    let failure_category = if output.exit_code.is_none() {
+        FailureCategory::Environment
+    } else {
+        validator.category.into()
+    };
+    let exit_code = output.exit_code;
+    let stdout = output.stdout;
+    let stderr = if output.termination != ValidationTermination::Exited {
+        bounded(&format!(
+            "validation {:?}: {}",
+            output.termination, output.stderr
+        ))
+    } else {
+        output.stderr
     };
     let failure_fingerprint = (outcome == ValidationOutcome::Failed).then(|| {
         fingerprint(
@@ -749,6 +771,9 @@ fn execute_validator(
         stdout,
         stderr,
         failure_fingerprint,
+        termination: Some(output.termination),
+        stdout_truncated: output.stdout_truncated,
+        stderr_truncated: output.stderr_truncated,
     }
 }
 

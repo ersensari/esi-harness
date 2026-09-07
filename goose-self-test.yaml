@@ -461,6 +461,19 @@ prompt: |
   {{ workspace_dir }}/provider_discovery.md; never mark filtered-out tests as run.
   {% endif %}
 
+  {% if test_phases == "all" or "validation-lifecycle" in test_phases %}
+  ## ESI Validation Lifecycle
+
+  Run with Hermit and isolated config, from the Studio checkout:
+  1. `node scripts/test-isolated.mjs cargo test --locked -p esi-development`
+  2. `node scripts/test-isolated.mjs cargo test --locked -p esi-development-visualizer`
+  3. `node scripts/test-isolated.mjs cargo test --locked -p esi-development --test workflow validation_lifecycle -- --test-threads=1`
+  Verify timeout, cancellation, descendant cleanup, bounded simultaneous streams,
+  optional-validator cancellation, legacy evidence and no review after failure.
+  Linux process groups are lifecycle controls, not hostile-process containment.
+  Record actual command results; unsupported platforms are never claimed tested.
+  {% endif %}
+
   {% if test_phases == "all" or "state-concurrency" in test_phases %}
   ## ESI State Concurrency
 
