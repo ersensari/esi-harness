@@ -20,6 +20,7 @@ pub mod download_manager;
 pub mod elicitation;
 pub mod esi_wiki_memory;
 pub mod execution;
+mod extension_trust;
 pub mod gateway;
 pub mod goose_apps;
 pub mod hints;

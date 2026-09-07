@@ -18,6 +18,7 @@ activities:
   - Validate ESI custom model profiles and isolated chat thinking overrides
   - Validate ESI plan/controller state concurrency and crash recovery
   - Validate required authority gate failures block both agent loops
+  - Validate configuration-bound extension Trust and revocation
   - Test error boundaries including nested delegation prevention
   - Generate comprehensive test report
 
@@ -26,7 +27,7 @@ parameters:
     input_type: string
     requirement: optional
     default: "all"
-    description: "Which test phases to run: all, basic, extensions, delegation, reasoning, acp-effort, model-profiles, state-concurrency, tool-authority, advanced"
+    description: "Which test phases to run: all, basic, extensions, delegation, reasoning, acp-effort, model-profiles, state-concurrency, tool-authority, extension-trust, advanced"
 
   - key: test_depth
     input_type: string
@@ -68,6 +69,16 @@ instructions: |
   - Test both success and failure paths
   - Document everything meticulously
   - Handle errors gracefully - a test failure shouldn't stop the suite
+
+  {% if test_phases == "all" or "extension-trust" in test_phases %}
+  ### Extension Trust regression
+  Run `node scripts/test-isolated.mjs cargo test --locked --release -p goose --lib extension_trust`.
+  Verify exact configuration grants, rejection after command changes, user deny,
+  queued revocation and unregistered-client spoofing. Do not modify real extension
+  grants. Record actual results in {{ workspace_dir }}/extension_trust.md.
+  Packaged acceptance additionally runs scripts/accept-model-profiles.mjs in trust
+  mode for legacy and state-machine loops; never claim these gates from unit tests.
+  {% endif %}
 
   ## Test Execution Framework
 

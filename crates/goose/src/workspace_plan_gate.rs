@@ -220,6 +220,9 @@ impl ToolInspector for WorkspacePlanInspector {
                 .tool_call
                 .as_ref()
                 .map(|call| {
+                    if crate::extension_trust::tool_is_trusted(&call.name) {
+                        return false;
+                    }
                     matches!(
                         categorize_tool(&call.name),
                         ToolCategory::Shell | ToolCategory::Write
@@ -237,6 +240,9 @@ impl ToolInspector for WorkspacePlanInspector {
                     let Ok(tool_call) = &request.tool_call else {
                         continue;
                     };
+                    if crate::extension_trust::tool_is_trusted(&tool_call.name) {
+                        continue;
+                    }
                     if matches!(
                         categorize_tool(&tool_call.name),
                         ToolCategory::Shell | ToolCategory::Write
@@ -264,6 +270,9 @@ impl ToolInspector for WorkspacePlanInspector {
                 continue;
             };
             let tool_name = tool_call.name.to_string();
+            if crate::extension_trust::tool_is_trusted(&tool_name) {
+                continue;
+            }
             if tool_name == WORKSPACE_PLAN_APPROVE_TOOL {
                 results.push(InspectionResult {
                     tool_request_id: request.id.clone(),

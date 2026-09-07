@@ -12,10 +12,12 @@ const require = createRequire(join(studio, 'ui/desktop/package.json'));
 const { chromium } = require('playwright');
 const [executable, reportPath, loop = 'legacy', mode = 'manual'] = process.argv.slice(2);
 const discovery = mode === 'discovery';
+const trust = mode === 'trust';
 assert(executable?.startsWith('/') && reportPath?.startsWith('/'));
 const root = await mkdtemp(join(tmpdir(), 'forgeloop-ai-model-profiles-'));
 const gooseRoot = join(root, 'goose'), profile = join(root, 'desktop'), workspace = join(root, 'workspace');
 for (const path of [join(gooseRoot, 'config/custom_providers'), profile, workspace, join(root, 'tmp')]) await mkdir(path, { recursive: true });
+if (trust) await writeFile(join(root, 'outside.txt'), 'POST147_OUTSIDE_WORKSPACE');
 const captures = [], checks = [];
 let app, browser, success = false;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -46,9 +48,18 @@ const server = createServer(async (req, res) => {
   captures.push(body);
   if (JSON.stringify(body.messages).includes('POST141 busy')) await delay(1500);
   const message = { role: 'assistant', content: 'POST141 OK', ...(body.enable_thinking ? { reasoning_content: 'fixture reasoning' } : {}) };
+  if (trust && body.messages.at(-1)?.role === 'user') {
+    const shell = JSON.stringify(body.messages.at(-1)).includes('POST147 shell');
+    message.content = null;
+    message.tool_calls = [{ id: 'trust-call', type: 'function', function: {
+      name: shell ? 'shell' : 'todo__todo_write', arguments: JSON.stringify(shell
+        ? { command: `cat ${JSON.stringify(join(root, 'outside.txt'))}` }
+        : { content: 'POST147 trusted loop execution' }),
+    } }];
+  }
   res.setHeader('content-type', 'application/json');
   res.end(JSON.stringify({ id: 'fixture-completion', object: 'chat.completion', created: 1, model: 'manual',
-    choices: [{ index: 0, message, finish_reason: 'stop' }], usage: { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 } }));
+    choices: [{ index: 0, message, finish_reason: message.tool_calls ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 } }));
 });
 await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -58,7 +69,9 @@ await writeFile(join(gooseRoot, 'config/custom_providers/custom_profile_fixture.
 }));
 await writeFile(join(gooseRoot, 'config/config.yaml'), JSON.stringify({
   GOOSE_PROVIDER: 'custom_profile_fixture', GOOSE_MODEL: 'manual', GOOSE_DISABLE_KEYRING: true,
-  GOOSE_TELEMETRY_ENABLED: false, GOOSE_MODE: 'chat', extensions: {},
+  GOOSE_TELEMETRY_ENABLED: false, GOOSE_MODE: trust ? 'auto' : 'chat',
+  extensions: trust ? { todo: { type: 'platform', name: 'todo', enabled: true, description: '' },
+    developer: { type: 'platform', name: 'developer', enabled: true, description: '' } } : {},
 }));
 await writeFile(join(profile, 'settings.json'), JSON.stringify({ language: 'en', disableAutoDownload: true, enableNotifications: false, showMenuBarIcon: false }));
 const env = Object.fromEntries(['PATH', 'DISPLAY', 'XAUTHORITY', 'LANG'].filter(k => process.env[k]).map(k => [k, process.env[k]]));
@@ -118,7 +131,36 @@ async function send(page, text) {
 }
 try {
   let page = await launch();
-  if (discovery) {
+  if (trust) {
+    assert.equal((await rpc(page, '_goose/esi/extension-trust', { configKey: 'todo' })).trusted, false);
+    await until(async () => {
+      if (await page.locator('#extension-todo').count()) return true;
+      await page.getByText('Extensions', { exact: true }).first().click({ timeout: 2000 });
+      return false;
+    }, 'extension settings');
+    const toggle = page.getByRole('switch', { name: 'Trust todo', exact: true });
+    await toggle.click();
+    await until(async () => (await rpc(page, '_goose/esi/extension-trust', { configKey: 'todo' })).trusted, 'trust saved');
+    pass('new extension starts untrusted and Settings Trust grants execution');
+    const session = await rpc(page, 'session/new', { cwd: workspace, mcpServers: [] });
+    await rpc(page, 'session/prompt', { sessionId: session.sessionId, prompt: [{ type: 'text', text: 'POST147 update todo' }] });
+    assert(captures.some(body => body.messages.some(message => message.role === 'tool' && JSON.stringify(message.content).includes('Updated'))));
+    pass('real agent loop executes trusted extension without a fabricated workspace receipt');
+    await page.getByRole('switch', { name: 'Trust developer', exact: true }).click();
+    await until(async () => (await rpc(page, '_goose/esi/extension-trust', { configKey: 'developer' })).trusted, 'developer trust saved');
+    await rpc(page, 'session/prompt', { sessionId: session.sessionId, prompt: [{ type: 'text', text: 'POST147 shell read operator fixture' }] });
+    assert(captures.some(body => body.messages.some(message => message.role === 'tool' && JSON.stringify(message.content).includes('POST147_OUTSIDE_WORKSPACE'))));
+    pass('trusted unprefixed developer shell works outside the workspace without a plan gate');
+    await toggle.click();
+    await until(async () => !(await rpc(page, '_goose/esi/extension-trust', { configKey: 'todo' })).trusted, 'trust revoked');
+    await assert.rejects(rpc(page, '_goose/unstable/tools/call', { sessionId: session.sessionId,
+      name: 'todo__todo_write', arguments: { content: 'must not execute' } }), /ESI authority/);
+    pass('revocation rejects execution in an already-connected session');
+    await close();
+    page = await launch();
+    assert.equal((await rpc(page, '_goose/esi/extension-trust', { configKey: 'todo' })).trusted, false);
+    pass('revoked Trust persists across Desktop restart');
+  } else if (discovery) {
     await page.getByRole('combobox', { name: 'Thinking', exact: true }).selectOption('max');
     await page.getByRole('button', { name: 'Model settings', exact: true }).click();
     await page.getByText(/Effective context: 262,144/).waitFor();

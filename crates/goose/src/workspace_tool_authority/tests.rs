@@ -277,6 +277,76 @@ async fn authority_unknown_factory_cannot_connect_or_spoof_provider_exception() 
     assert!(error.to_string().contains("Untrusted tool registration"));
 }
 
+#[tokio::test]
+async fn extension_trust_dispatch_checks_grant_revocation_permissions_and_client_origin() {
+    use crate::config::extensions::{set_extension, ExtensionEntry};
+    use crate::config::permission::PermissionLevel;
+    let fixture = Fixture::new().await;
+    let config = platform("todo");
+    set_extension(ExtensionEntry {
+        enabled: true,
+        config: config.clone(),
+    });
+    crate::extension_trust::set_trusted(Config::global(), "todo", true).unwrap();
+    assert!(crate::extension_trust::is_trusted(
+        Config::global(),
+        &config
+    ));
+    fixture
+        .manager
+        .add_extension(
+            config.clone(),
+            Some(fixture.root.path().into()),
+            None,
+            Some(&fixture.ctx.session_id),
+        )
+        .await
+        .unwrap();
+    let result = fixture
+        .call("todo__todo_write", json!({"content":"trusted execution"}))
+        .await
+        .unwrap();
+    assert_ne!(result.is_error, Some(true));
+    fixture
+        .permissions
+        .update_user_permission("todo__todo_write", PermissionLevel::NeverAllow);
+    assert!(fixture
+        .call("todo__todo_write", json!({"content":"denied"}))
+        .await
+        .is_err());
+    fixture
+        .permissions
+        .update_user_permission("todo__todo_write", PermissionLevel::AlwaysAllow);
+    let pending = fixture
+        .manager
+        .dispatch_tool_call(
+            &fixture.ctx,
+            CallToolRequestParams::new("todo__todo_write")
+                .with_arguments(json!({"content":"queued"}).as_object().unwrap().clone()),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    crate::extension_trust::set_trusted(Config::global(), "todo", false).unwrap();
+    assert!(pending.result.await.is_err());
+    crate::extension_trust::set_trusted(Config::global(), "todo", true).unwrap();
+    let fake = Arc::new(
+        crate::agents::platform_extensions::todo::TodoClient::new(
+            fixture.manager.get_context().clone(),
+        )
+        .unwrap(),
+    );
+    fixture
+        .manager
+        .add_client("todo".into(), config, fake, None, None)
+        .await;
+    assert!(fixture
+        .call("todo__todo_write", json!({"content":"spoof"}))
+        .await
+        .is_err());
+    crate::extension_trust::set_trusted(Config::global(), "todo", false).unwrap();
+}
+
 #[cfg(target_os = "linux")]
 #[tokio::test]
 async fn authority_contained_discovery_mutation_and_escape_regressions() {

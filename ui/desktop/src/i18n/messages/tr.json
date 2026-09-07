@@ -1,4 +1,9 @@
 {
+  "extensionTrust.title": { "defaultMessage": "Trust — kısıtlamasız çalıştırma" },
+  "extensionTrust.toggle": { "defaultMessage": "{name} için Trust" },
+  "extensionTrust.help": { "defaultMessage": "Güvenilir extension'lar çalışma alanı dışındaki dosyalara ve ağa erişebilir. Araç izinleri geçerliliğini korur. Güven verdikten sonra extension'ı yeniden bağlayın veya yeni sohbet açın." },
+  "extensionTrust.loadError": { "defaultMessage": "Trust bilgisi yüklenemedi. Extension'ı kaydedip Ayarlar'ı yeniden açın." },
+  "extensionTrust.saveError": { "defaultMessage": "Trust güncellenemedi. Önceki izin değişmedi." },
   "alertBox.autoCompactAt": {
     "defaultMessage": "Otomatik sıkıştırma eşiği"
   },

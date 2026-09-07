@@ -52,7 +52,7 @@ fn inject_name_if_missing(key: &str, value: serde_yaml::Value) -> serde_yaml::Va
     }
 }
 
-fn parse_extensions_map(raw: &Mapping) -> IndexMap<String, ExtensionEntry> {
+pub(crate) fn parse_extensions_map(raw: &Mapping) -> IndexMap<String, ExtensionEntry> {
     let mut extensions_map = IndexMap::with_capacity(raw.len());
     for (k, v) in raw {
         let Some(key) = k.as_str() else {

@@ -9,6 +9,26 @@ impl GooseAcpAgent {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, agent_client_protocol::Error> {
         let result = async {
+            if method == "_goose/esi/extension-trust" {
+                #[derive(serde::Deserialize)]
+                #[serde(rename_all = "camelCase", deny_unknown_fields)]
+                struct TrustRequest {
+                    config_key: String,
+                    trusted: Option<bool>,
+                }
+                let request: TrustRequest = serde_json::from_value(params)
+                    .map_err(|_| agent_client_protocol::Error::invalid_params())?;
+                let config = self.config()?;
+                if let Some(trusted) = request.trusted {
+                    crate::extension_trust::set_trusted(config, &request.config_key, trusted)
+                        .invalid_params_err_ctx("Cannot change extension Trust")?;
+                }
+                let extension = crate::extension_trust::configured(config, &request.config_key)
+                    .invalid_params_err_ctx("Extension not configured")?;
+                return Ok(serde_json::json!({
+                    "trusted": crate::extension_trust::is_trusted(config, &extension)
+                }));
+            }
             if method.starts_with("_goose/esi/model-profile/") {
                 return self.on_model_profile(method, params).await;
             }

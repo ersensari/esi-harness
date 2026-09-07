@@ -1,4 +1,9 @@
 {
+  "extensionTrust.title": { "defaultMessage": "Trust — unrestricted execution" },
+  "extensionTrust.toggle": { "defaultMessage": "Trust {name}" },
+  "extensionTrust.help": { "defaultMessage": "Trusted extensions can access files and networks outside the workspace. Tool permissions still apply. After granting trust, reconnect the extension or start a new chat." },
+  "extensionTrust.loadError": { "defaultMessage": "Could not load Trust. Save the extension and reopen Settings." },
+  "extensionTrust.saveError": { "defaultMessage": "Could not update Trust. The previous permission remains unchanged." },
   "alertBox.autoCompactAt": {
     "defaultMessage": "Tự động nén tại"
   },

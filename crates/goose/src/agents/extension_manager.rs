@@ -122,6 +122,7 @@ fn resolve_timeout(timeout: Option<u64>) -> u64 {
 }
 
 struct Extension {
+    constructed_from_config: bool,
     authority: Option<crate::workspace_tool_authority::Factory>,
     pub config: ExtensionConfig,
     /// Resolved config snapshot (with secrets from keyring substituted)
@@ -145,6 +146,7 @@ impl Extension {
     ) -> Self {
         Self {
             authority: None,
+            constructed_from_config: false,
             client,
             config,
             resolved_config,
@@ -1466,6 +1468,7 @@ impl ExtensionManager {
         let sanitized_name = config.key();
 
         if self.managed_authority
+            && !crate::extension_trust::is_trusted(Config::global(), &config)
             && !(matches!(
                 config,
                 ExtensionConfig::Builtin { .. } | ExtensionConfig::Platform { .. }
@@ -1473,7 +1476,7 @@ impl ExtensionManager {
                 .is_some())
         {
             return Err(ExtensionError::ConfigError(
-                "ESI authority: this extension has no contained execution policy. Official Codex/Claude provider delegation is separate and remains available.".into(),
+                "ESI authority: enable Trust for this extension in Settings → Extensions to allow unrestricted execution.".into(),
             ));
         }
 
@@ -1750,6 +1753,7 @@ impl ExtensionManager {
             sanitized_name,
             Extension {
                 authority,
+                constructed_from_config: true,
                 ..Extension::new(
                     config,
                     resolved_config,
@@ -2514,7 +2518,7 @@ impl ExtensionManager {
                         None,
                     )
                 })?;
-                let authority = {
+                let (authority, trusted) = {
                     let registry = authority_registry.lock().await;
                     registry
                         .get(&resolved_tool.extension_name)
@@ -2522,25 +2526,40 @@ impl ExtensionManager {
                             Arc::ptr_eq(&extension.client, &client)
                                 && extension.config.is_tool_available(&actual_tool_name)
                         })
-                        .and_then(|extension| extension.authority)
+                        .map(|extension| {
+                            (
+                                extension.authority,
+                                extension.constructed_from_config
+                                    && crate::extension_trust::is_trusted(
+                                        Config::global(),
+                                        &extension.config,
+                                    ),
+                            )
+                        })
+                        .unwrap_or((None, false))
                 };
-                return crate::workspace_tool_authority::execute(
-                    authority,
-                    &authority_sessions,
-                    &owned_ctx,
-                    &actual_tool_name,
-                    arguments,
-                    client.as_ref(),
-                    cancellation_token,
-                )
-                .await
-                .map_err(|error| {
-                    ErrorData::new(
-                        ErrorCode::INVALID_REQUEST,
-                        format!("ESI authority: {error}"),
-                        None,
+                if !trusted
+                    || (resolved_tool.extension_name == "workspaceplan"
+                        && actual_tool_name == "approve")
+                {
+                    return crate::workspace_tool_authority::execute(
+                        authority,
+                        &authority_sessions,
+                        &owned_ctx,
+                        &actual_tool_name,
+                        arguments,
+                        client.as_ref(),
+                        cancellation_token,
                     )
-                });
+                    .await
+                    .map_err(|error| {
+                        ErrorData::new(
+                            ErrorCode::INVALID_REQUEST,
+                            format!("ESI authority: {error}"),
+                            None,
+                        )
+                    });
+                }
             }
             tracing::debug!(
                 "dispatch_tool_call: calling client.call_tool tool={} session_id={} working_dir={:?}",

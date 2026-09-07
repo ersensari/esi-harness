@@ -4,6 +4,8 @@ import ExtensionItem from './ExtensionItem';
 import { IntlTestWrapper } from '../../../../i18n/test-utils';
 import type { FixedExtensionEntry } from '../../../ConfigContext';
 
+vi.mock('./ExtensionTrust', () => ({ default: () => <div data-testid="extension-trust" /> }));
+
 vi.mock('./ExtensionList', () => ({
   getSubtitle: () => ({ description: '', command: '' }),
   getFriendlyTitle: (ext: { name: string }) => ext.name,

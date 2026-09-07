@@ -14,6 +14,7 @@ const phaseTitles = {
   'provider-discovery': 'ESI Provider Model Discovery',
   'state-concurrency': 'ESI State Concurrency',
   'tool-authority': 'ESI Required Authority Gates',
+  'extension-trust': 'Extension Trust regression',
 };
 assert(Object.hasOwn(phaseTitles, phase));
 const phaseTitle = phaseTitles[phase];
@@ -22,7 +23,11 @@ const root = await mkdtemp(join(tmpdir(), 'forgeloop-ai-profile-selftest-'));
 const artifacts = join(root, 'artifacts');
 await mkdir(artifacts);
 await mkdir(join(root, 'config/custom_providers'), { recursive: true });
-const commands = phase === 'provider-discovery' ? [
+const commands = phase === 'extension-trust' ? [
+  'node scripts/test-isolated.mjs cargo test --locked --release -p goose --lib extension_trust -- --quiet',
+  'node scripts/test-isolated.mjs cargo test --locked --release -p goose --lib authority_ -- --quiet',
+  'node scripts/test-isolated.mjs cargo test --locked --release -p goose --lib workspace_plan -- --quiet',
+] : phase === 'provider-discovery' ? [
   'node scripts/test-isolated.mjs cargo test --locked --release -p goose-provider-types --test model_profiles -- --quiet',
   'node scripts/test-isolated.mjs cargo test --locked --release -p goose-providers --lib discovery -- --quiet',
   'node scripts/test-isolated.mjs cargo test --locked --release -p goose --test model_profiles -- --quiet',

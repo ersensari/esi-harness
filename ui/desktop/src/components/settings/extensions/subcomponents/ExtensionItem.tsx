@@ -6,6 +6,7 @@ import { FixedExtensionEntry } from '../../../ConfigContext';
 import { getSubtitle, getFriendlyTitle } from './ExtensionList';
 import { Card, CardHeader, CardTitle, CardContent, CardAction } from '../../../ui/card';
 import { defineMessages, useIntl } from '../../../../i18n';
+import ExtensionTrust from './ExtensionTrust';
 
 const i18n = defineMessages({
   configureExtension: {
@@ -121,6 +122,15 @@ export default function ExtensionItem({
       </CardHeader>
       <CardContent className="px-4 overflow-hidden text-sm break-words text-text-secondary">
         {renderSubtitle()}
+        {!isStatic && (
+          <ExtensionTrust
+            key={JSON.stringify(extension)}
+            configKey={extension.name
+              .replace(/\s/g, '')
+              .replace(/[^a-zA-Z0-9_-]/g, '_')
+              .toLowerCase()}
+          />
+        )}
       </CardContent>
     </Card>
   );
