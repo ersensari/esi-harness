@@ -28,7 +28,8 @@ const INHERITED_SESSION_PARAM_KEYS: &[&str] = &[
 pub fn is_goose_internal_request_param(key: &str) -> bool {
     matches!(
         key,
-        "thinking_effort"
+        "esi_model_profile"
+            | "thinking_effort"
             | "disable_prompt_cache"
             | "emit_clear_thinking"
             | "preserve_thinking_context"

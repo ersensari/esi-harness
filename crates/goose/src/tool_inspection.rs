@@ -86,6 +86,12 @@ pub trait ToolInspector: Send + Sync {
         true
     }
 
+    /// Required authority gates must deny execution when unavailable. Advisory
+    /// inspectors retain best-effort behavior; names do not determine authority.
+    fn is_required(&self) -> bool {
+        false
+    }
+
     /// Allow downcasting to concrete types
     fn as_any(&self) -> &dyn std::any::Any;
 }
@@ -120,6 +126,9 @@ impl ToolInspectionManager {
 
         for inspector in &self.inspectors {
             if !inspector.is_enabled() {
+                if inspector.is_required() {
+                    all_results.extend(unavailable_gate_denials(inspector.as_ref(), tool_requests));
+                }
                 continue;
             }
 
@@ -147,7 +156,10 @@ impl ToolInspectionManager {
                         error = %e,
                         "Tool inspector failed"
                     );
-                    // Continue with other inspectors even if one fails
+                    if inspector.is_required() {
+                        all_results
+                            .extend(unavailable_gate_denials(inspector.as_ref(), tool_requests));
+                    }
                 }
             }
         }
@@ -200,6 +212,20 @@ impl Default for ToolInspectionManager {
     fn default() -> Self {
         Self::new()
     }
+}
+
+fn unavailable_gate_denials(
+    inspector: &dyn ToolInspector,
+    requests: &[ToolRequest],
+) -> Vec<InspectionResult> {
+    requests.iter().map(|request| InspectionResult {
+        tool_request_id: request.id.clone(),
+        action: InspectionAction::Deny,
+        reason: format!("Required tool authority gate `{}` is unavailable. No tool in this batch may execute; restore the gate and retry.", inspector.name()),
+        confidence: 1.0,
+        inspector_name: inspector.name().to_string(),
+        finding_id: None,
+    }).collect()
 }
 
 /// Apply inspection results to permission check results

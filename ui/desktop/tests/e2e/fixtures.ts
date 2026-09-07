@@ -12,11 +12,11 @@ type GooseTestFixtures = {
 /**
  * Test-scoped fixture that launches a fresh Electron app for EACH test.
  *
- * Isolation: ⚠️ Partial - each test gets a fresh app instance, but uses ambient user config
+ * Isolation: the runner supplies a disposable config root for this test run.
  * Speed: ⚠️ Slow - ~3s startup overhead per test
  *
  * This ensures each test starts with a fresh app instance, but the app uses the
- * user's existing Goose configuration (providers, models, etc.).
+ * isolated configuration, not the operator's providers or credentials.
  *
  * Usage:
  *   import { test, expect } from './fixtures';
@@ -29,6 +29,7 @@ type GooseTestFixtures = {
 export const test = base.extend<GooseTestFixtures>({
   // Test-scoped fixture: launches a fresh Electron app for each test
   goosePage: async ({ browserName }, providePage, testInfo) => {
+    require('../../../../scripts/test-environment.cjs').assertIsolatedTestEnvironment();
     void browserName;
     console.log(`Launching fresh Electron app for test: ${testInfo.title}`);
 

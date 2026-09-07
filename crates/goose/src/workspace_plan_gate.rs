@@ -9,7 +9,7 @@
 //! ever going through the controller. [`WorkspacePlanInspector`] closes that
 //! gap: it runs as a [`ToolInspector`] for every tool call, resolves the
 //! calling session's bound working directory, and denies shell execution and
-//! file writes/edits outside the plan-management directory unless that
+//! file writes/edits unless that
 //! workspace has a currently approved plan.
 //!
 //! This is deterministic, code-level enforcement — not a skill/prompt
@@ -27,10 +27,10 @@ use async_trait::async_trait;
 use crate::config::GooseMode;
 use crate::conversation::message::{Message, ToolRequest};
 use crate::session::SessionManager;
-use crate::tool_inspection::{categorize_tool, extract_string_arg, InspectionAction};
+use crate::tool_inspection::{categorize_tool, InspectionAction};
 use crate::tool_inspection::{InspectionResult, ToolCategory, ToolInspector};
 
-/// Tool-argument keys that carry a target file path, checked in priority order.
+/// Exactly one of these target keys is required; conflicting aliases fail closed.
 const PATH_ARG_KEYS: &[&str] = &["path", "file", "file_path"];
 const WORKSPACE_PLAN_EXTENSION_PREFIX: &str = "workspaceplan__";
 const WORKSPACE_PLAN_APPROVE_TOOL: &str = "workspaceplan__approve";
@@ -48,10 +48,7 @@ impl WorkspacePlanInspector {
 
     /// Resolve the canonical working directory bound to `session_id`, the
     /// same directory used to locate `<workspace>/.esi/workspace-plan.json`.
-    /// Returns `None` when the session cannot be resolved (for example, an
-    /// ephemeral/test session with no persisted record); such requests are
-    /// left to other inspectors rather than blocked, since there is no
-    /// workspace to bind a plan to.
+    /// Unresolvable sessions/workspaces fail closed for inspected mutations.
     async fn resolve_working_dir(&self, session_id: &str) -> Result<PathBuf> {
         if session_id.is_empty() {
             anyhow::bail!("the tool call is not bound to a persisted Desktop session");
@@ -61,50 +58,73 @@ impl WorkspacePlanInspector {
             .get_session(session_id, false)
             .await
             .map_err(|error| anyhow::anyhow!("cannot resolve Desktop session: {error}"))?;
-        Ok(canonicalize_best_effort(&session.working_dir))
+        Ok(session.working_dir.canonicalize()?)
     }
 }
 
-fn canonicalize_best_effort(path: &Path) -> PathBuf {
-    path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
-}
-
-/// Lexically normalize a path (resolve `.`/`..` components without touching
-/// the filesystem). Used to test plan-management scope for paths that may
-/// not exist yet (a not-yet-created `.esi/workspace-plan.json`).
-fn normalize_lexically(path: &Path) -> PathBuf {
-    let mut out = PathBuf::new();
-    for component in path.components() {
-        match component {
-            Component::ParentDir => {
-                out.pop();
-            }
-            Component::CurDir => {}
-            other => out.push(other.as_os_str()),
-        }
-    }
-    out
-}
-
-/// Returns `true` when `raw_path` (as given in a tool call's arguments,
-/// resolved against `working_dir`) stays within `<working_dir>/.esi/`. Writes
-/// scoped to that directory are bounded plan-management operations (creating
-/// or revising the durable workspace plan itself) and are allowed even
-/// without an approved plan, per ADR-0010's discovery/planning flow.
-fn is_plan_management_path(working_dir: &Path, raw_path: &str) -> bool {
+/// Resolve existing ancestors without letting a symlink alias hide a control
+/// or outside path. This is an inspection check, not a filesystem race sandbox.
+pub(crate) fn validate_write_path(working_dir: &Path, raw_path: &str) -> Result<()> {
     let candidate = Path::new(raw_path);
+    if raw_path.is_empty() || candidate.components().any(|c| c == Component::ParentDir) {
+        anyhow::bail!("file target is empty or contains parent traversal");
+    }
     let joined = if candidate.is_absolute() {
         candidate.to_path_buf()
     } else {
         working_dir.join(candidate)
     };
-    let normalized = normalize_lexically(&joined);
-    let plan_dir = normalize_lexically(&working_dir.join(".esi"));
-    if std::fs::symlink_metadata(&plan_dir).is_ok_and(|metadata| metadata.file_type().is_symlink())
-    {
-        return false;
+    let joined: PathBuf = joined.components().collect();
+    let control = working_dir.join(".esi");
+    if !joined.starts_with(working_dir) || joined.starts_with(&control) {
+        anyhow::bail!("file target is outside the workspace or inside reserved .esi state");
     }
-    normalized == normalize_lexically(&working_dir.join(esi_workspace_plan::PLAN_RELATIVE_PATH))
+    let mut ancestor = joined.as_path();
+    let mut missing = Vec::new();
+    loop {
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(_) => break,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                missing.push(
+                    ancestor
+                        .file_name()
+                        .ok_or_else(|| anyhow::anyhow!("invalid file target"))?,
+                );
+                ancestor = ancestor
+                    .parent()
+                    .ok_or_else(|| anyhow::anyhow!("invalid file parent"))?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+    }
+    let mut resolved = ancestor.canonicalize()?;
+    for name in missing.into_iter().rev() {
+        resolved.push(name);
+    }
+    if !resolved.starts_with(working_dir) || resolved.starts_with(&control) {
+        anyhow::bail!(
+            "resolved file target is outside the workspace or inside reserved .esi state"
+        );
+    }
+    Ok(())
+}
+
+fn validate_write_arguments(
+    working_dir: &Path,
+    arguments: Option<&serde_json::Map<String, serde_json::Value>>,
+) -> Result<()> {
+    let arguments = arguments.ok_or_else(|| anyhow::anyhow!("file target is missing"))?;
+    let targets: Vec<_> = PATH_ARG_KEYS
+        .iter()
+        .filter_map(|key| arguments.get(*key))
+        .collect();
+    if targets.len() != 1 {
+        anyhow::bail!("exactly one unambiguous file target is required");
+    }
+    let path = targets[0]
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("file target must be a string"))?;
+    validate_write_path(working_dir, path)
 }
 
 /// Build the user-facing denial message. This is what the model receives in
@@ -173,6 +193,10 @@ fn unbound_session_denial_message(tool_name: &str, reason: &str) -> String {
 
 #[async_trait]
 impl ToolInspector for WorkspacePlanInspector {
+    fn is_required(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &'static str {
         "workspace_plan"
     }
@@ -268,20 +292,18 @@ impl ToolInspector for WorkspacePlanInspector {
             }
 
             if category == ToolCategory::Write {
-                let arguments = tool_call
-                    .arguments
-                    .clone()
-                    .map(serde_json::Map::from_iter)
-                    .map(serde_json::Value::Object);
-                if let Some(path_arg) = arguments
-                    .as_ref()
-                    .and_then(|v| extract_string_arg(v, PATH_ARG_KEYS))
+                if let Err(error) =
+                    validate_write_arguments(&working_dir, tool_call.arguments.as_ref())
                 {
-                    if is_plan_management_path(&working_dir, &path_arg) {
-                        // Bounded plan-management write: allowed regardless
-                        // of plan status.
-                        continue;
-                    }
+                    results.push(InspectionResult {
+                        tool_request_id: request.id.clone(),
+                        action: InspectionAction::Deny,
+                        reason: format!("ESI workspace plan gate blocked `{tool_name}`: {error}. Use workspaceplan__save_draft for plan changes; generic file tools cannot edit control state."),
+                        confidence: 1.0,
+                        inspector_name: self.name().to_string(),
+                        finding_id: None,
+                    });
+                    continue;
                 }
             }
 
@@ -464,7 +486,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn only_the_workspace_plan_file_is_writable_before_approval() {
+    async fn raw_plan_json_is_not_writable_before_approval() {
         let data = TempDir::new().unwrap();
         let workspace = TempDir::new().unwrap();
         let session_manager = Arc::new(SessionManager::new(data.path().to_path_buf()));
@@ -497,8 +519,86 @@ mod tests {
                 .iter()
                 .map(|result| result.tool_request_id.as_str())
                 .collect::<Vec<_>>(),
-            ["escape", "other"]
+            ["plan", "escape", "other"]
         );
+    }
+
+    #[tokio::test]
+    async fn approved_plan_does_not_authorize_control_state_or_outside_writes() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        save_approved_plan(workspace.path());
+        let manager = Arc::new(SessionManager::new(data.path().to_path_buf()));
+        let session = create_session(&manager, workspace.path(), "Write boundaries").await;
+        let inspector = WorkspacePlanInspector::new(manager);
+        let mut paths = vec![
+            ".esi/workspace-plan.json".to_string(),
+            ".esi/workspace-plan.json.lock".to_string(),
+            ".esi/development-state.json".to_string(),
+            "../outside.txt".to_string(),
+            outside
+                .path()
+                .join("absolute.txt")
+                .to_string_lossy()
+                .into_owned(),
+        ];
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outside.path(), workspace.path().join("escape")).unwrap();
+            std::os::unix::fs::symlink(
+                workspace.path().join(".esi"),
+                workspace.path().join("control"),
+            )
+            .unwrap();
+            paths.push("escape/new/file.txt".into());
+            paths.push("control/workspace-plan.json".into());
+        }
+        for path in paths {
+            let result = inspector
+                .inspect(
+                    &session.id,
+                    &[request(
+                        "write",
+                        "developer__write",
+                        object!({"path": path, "content": "forged"}),
+                    )],
+                    &[],
+                    GooseMode::Auto,
+                )
+                .await
+                .unwrap();
+            assert_eq!(result.len(), 1, "path must be rejected: {path}");
+            assert_eq!(result[0].action, InspectionAction::Deny);
+        }
+        let missing = inspector
+            .inspect(
+                &session.id,
+                &[request(
+                    "missing",
+                    "developer__write",
+                    object!({"content": "no target"}),
+                )],
+                &[],
+                GooseMode::Auto,
+            )
+            .await
+            .unwrap();
+        assert_eq!(missing[0].action, InspectionAction::Deny);
+        let valid = inspector
+            .inspect(
+                &session.id,
+                &[request(
+                    "source",
+                    "developer__write",
+                    object!({"path": "src/new/file.rs", "content": ""}),
+                )],
+                &[],
+                GooseMode::Auto,
+            )
+            .await
+            .unwrap();
+        assert!(valid.is_empty());
     }
 
     #[tokio::test]

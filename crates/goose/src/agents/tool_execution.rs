@@ -35,6 +35,7 @@ impl ToolCallNotificationEmitter {
 /// Context passed through the tool call dispatch chain.
 #[derive(Clone)]
 pub struct ToolCallContext {
+    pub(crate) requires_workspace_receipt: bool,
     pub session_id: String,
     pub working_dir: Option<PathBuf>,
     pub tool_call_request_id: Option<String>,
@@ -48,6 +49,7 @@ impl ToolCallContext {
         tool_call_request_id: Option<String>,
     ) -> Self {
         Self {
+            requires_workspace_receipt: false,
             session_id,
             working_dir,
             tool_call_request_id,

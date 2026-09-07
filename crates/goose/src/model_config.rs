@@ -27,10 +27,22 @@ pub fn model_config_from_user_config_with_session_settings(
 ) -> Result<ModelConfig> {
     let config = Config::global();
     let model = base_model_config_from_user_config(provider_name, model_name.as_ref())?;
-    let model = materialize_model_config_inner(model, provider_name, false)?
+    // Custom profiles are exact-pair settings; preserve the upstream inheritance
+    // contract for unprofiled built-in providers and their delegated models.
+    let previous = previous.filter(|old| {
+        old.model_name == model.model_name
+            || (!provider_name.starts_with("custom_")
+                && old
+                    .request_param::<crate::model_profiles::ModelProfile>(
+                        goose_providers::model_profile::PROFILE_PARAM,
+                    )
+                    .is_none())
+    });
+    let model = model
         .with_context_limit(context_limit)
-        .with_inherited_session_settings_from(previous, request_params)
-        .with_default_thinking_effort(config.get_goose_thinking_effort());
+        .with_inherited_session_settings_from(previous, request_params);
+    let model = materialize_model_config_inner(model, provider_name, false)?;
+    let model = with_global_thinking_default(model, config);
 
     Ok(apply_canonical_limits(provider_name, model))
 }
@@ -41,7 +53,14 @@ pub fn materialize_model_config(provider_name: &str, model: ModelConfig) -> Resu
 }
 
 fn apply_canonical_limits(provider_name: &str, model: ModelConfig) -> ModelConfig {
-    if provider_name == goose_providers::azure_foundry::AZURE_FOUNDRY_PROVIDER_NAME {
+    if provider_name.starts_with("custom_")
+        || provider_name == goose_providers::azure_foundry::AZURE_FOUNDRY_PROVIDER_NAME
+        || model
+            .request_param::<crate::model_profiles::ModelProfile>(
+                goose_providers::model_profile::PROFILE_PARAM,
+            )
+            .is_some()
+    {
         model
     } else {
         model.with_canonical_limits(provider_name)
@@ -54,6 +73,8 @@ fn materialize_model_config_inner(
     include_default_thinking_effort: bool,
 ) -> Result<ModelConfig> {
     let config = Config::global();
+
+    model = crate::model_profiles::apply(config, provider_name, model)?;
 
     if model.temperature.is_none() {
         model = model.with_temperature(get_goose_temperature(config)?);
@@ -68,7 +89,7 @@ fn materialize_model_config_inner(
         .with_default_max_tokens(config.get_goose_max_tokens()?);
 
     if include_default_thinking_effort {
-        model = model.with_default_thinking_effort(config.get_goose_thinking_effort());
+        model = with_global_thinking_default(model, config);
     }
 
     if provider_name == goose_providers::openai::OPEN_AI_PROVIDER_NAME {
@@ -76,6 +97,19 @@ fn materialize_model_config_inner(
     }
 
     Ok(model)
+}
+
+fn with_global_thinking_default(model: ModelConfig, config: &Config) -> ModelConfig {
+    if model
+        .request_param::<crate::model_profiles::ModelProfile>(
+            goose_providers::model_profile::PROFILE_PARAM,
+        )
+        .is_some()
+    {
+        model
+    } else {
+        model.with_default_thinking_effort(config.get_goose_thinking_effort())
+    }
 }
 
 fn configured_fast_model_name() -> Option<String> {
@@ -215,7 +249,7 @@ fn base_model_config_from_user_config(
     let mut model = ModelConfig {
         model_name: model_name.to_string(),
         context_limit: None,
-        temperature: get_goose_temperature(config)?,
+        temperature: None,
         max_tokens: None,
         toolshim: get_goose_toolshim(config)?.unwrap_or(false),
         toolshim_model: get_goose_toolshim_model(config)?,
@@ -224,7 +258,9 @@ fn base_model_config_from_user_config(
         supports_vision: None,
         request_headers: None,
     };
-    if provider_name != goose_providers::azure_foundry::AZURE_FOUNDRY_PROVIDER_NAME {
+    if provider_name != goose_providers::azure_foundry::AZURE_FOUNDRY_PROVIDER_NAME
+        && !provider_name.starts_with("custom_")
+    {
         model.normalize_effort_suffix();
     }
     Ok(model)

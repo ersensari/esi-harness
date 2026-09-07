@@ -296,6 +296,11 @@ export function imageDataFromMessage(message: Message): ImageData[] {
 export interface UserInput {
   msg: string;
   images: ImageData[];
+  initialThinking?: {
+    provider: string;
+    model: string;
+    effort: 'off' | 'low' | 'medium' | 'high' | 'max';
+  };
 }
 
 export function createUserMessage(text: string, images?: ImageData[]): Message {

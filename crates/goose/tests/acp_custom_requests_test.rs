@@ -26,8 +26,162 @@ use common_tests::fixtures::OpenAiFixture;
 const DEFAULT_ACP_TEST_CONFIG: &str =
     "GOOSE_MODEL: gpt-4o\nGOOSE_PROVIDER: openai\nGOOSE_DISABLE_KEYRING: true\n";
 
+#[test]
+#[serial]
+fn wiki_session_renewal_is_private_config_request_without_token_response() {
+    write_acp_global_config(DEFAULT_ACP_TEST_CONFIG);
+    run_test(async move {
+        use wiremock::{matchers::path, Mock, MockServer, ResponseTemplate};
+        let wiki = MockServer::start().await;
+        Mock::given(path("/v1/sessions"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_json(serde_json::json!({"token":"wiki_session_fixture_new"})),
+            )
+            .expect(1)
+            .mount(&wiki)
+            .await;
+        // The ACP fixture writes its default config during connection startup.
+        // Configure Wiki afterwards, as a live settings update would do.
+        let openai = OpenAiFixture::new(vec![], Arc::new(EnforceSessionId::default())).await;
+        let conn = AcpServerConnection::new(TestConnectionConfig::default(), openai).await;
+        let config = goose::config::Config::global();
+        config
+            .set_param(
+                "extensions",
+                serde_json::json!({"esi-wiki": {
+                    "enabled":true, "type":"streamable_http", "name":"esi-wiki",
+                    "uri":format!("{}/mcp", wiki.uri()), "env_keys":["ESI_WIKI_AUTHORIZATION"],
+                    "headers":{"Authorization":"${ESI_WIKI_AUTHORIZATION}"}
+                }}),
+            )
+            .unwrap();
+        config
+            .set_secret("ESI_WIKI_AUTHORIZATION", &"Bearer wiki_session_fixture_old")
+            .unwrap();
+        assert_eq!(
+            config
+                .get_secret::<String>("ESI_WIKI_AUTHORIZATION")
+                .unwrap(),
+            "Bearer wiki_session_fixture_old"
+        );
+        let response = send_custom(
+            conn.cx(),
+            "_goose/esi/wiki/session/renew",
+            serde_json::json!({"handle":"fixture", "password":"test-only-password"}),
+        )
+        .await
+        .unwrap();
+        assert_eq!(response, serde_json::json!({}));
+        assert_eq!(
+            config
+                .get_secret::<String>("ESI_WIKI_AUTHORIZATION")
+                .unwrap(),
+            "Bearer wiki_session_fixture_new"
+        );
+        let malformed = send_custom(
+            conn.cx(),
+            "_goose/esi/wiki/session/renew",
+            serde_json::json!({"handle":"fixture", "password":{"secret":"must-not-echo"}}),
+        )
+        .await
+        .unwrap_err();
+        assert!(!format!("{malformed:?}").contains("must-not-echo"));
+        config
+            .set_param("extensions", serde_json::json!({}))
+            .unwrap();
+    });
+}
+
 static ACP_CONFIG_ROOT: LazyLock<tempfile::TempDir> =
     LazyLock::new(|| tempfile::tempdir().unwrap());
+
+#[test]
+#[serial]
+fn model_profiles_private_acp_roundtrip_and_server_context() {
+    write_acp_global_config(DEFAULT_ACP_TEST_CONFIG);
+    run_test(async {
+        use wiremock::{matchers::path, Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(path("/v1/models")).respond_with(ResponseTemplate::new(200)
+            .set_body_json(serde_json::json!({"data":[{"id":"manual", "owned_by":"unsloth-studio", "context_length":32768}]})))
+            .mount(&server).await;
+        let openai = OpenAiFixture::new(vec![], Arc::new(EnforceSessionId::default())).await;
+        let conn = AcpServerConnection::new(TestConnectionConfig::default(), openai).await;
+        let created = send_custom(
+            conn.cx(),
+            "_goose/unstable/providers/custom/create",
+            serde_json::json!({
+                "engine":"openai", "displayName":"Profile ACP fixture", "apiUrl":server.uri(),
+                "models":["manual"], "requiresAuth":false,
+            }),
+        )
+        .await
+        .unwrap();
+        let provider = created["providerId"].as_str().unwrap();
+        let target = serde_json::json!({"provider":provider, "model":"manual"});
+        let initial = send_custom(conn.cx(), "_goose/esi/model-profile/read", target.clone())
+            .await
+            .unwrap();
+        assert_eq!(initial["contextLimit"], 32768);
+        assert_eq!(initial["contextSource"], "server");
+        send_custom(conn.cx(), "_goose/esi/model-profile/save", serde_json::json!({
+            "provider":provider, "model":"manual", "profile":{
+                "context_limit":65536, "temperature":0.7, "thinking_protocol":"unsloth", "thinking_effort":"low"
+            }
+        })).await.unwrap();
+        let saved = send_custom(conn.cx(), "_goose/esi/model-profile/read", target.clone())
+            .await
+            .unwrap();
+        assert_eq!(saved["contextSource"], "manual");
+        assert_eq!(saved["contextWarning"], true);
+        assert_eq!(saved["profile"]["thinking_effort"], "low");
+        assert!(send_custom(
+            conn.cx(),
+            "_goose/esi/model-profile/save",
+            serde_json::json!({
+                "provider":provider, "model":"manual", "profile":{"top_k":20}
+            })
+        )
+        .await
+        .is_err());
+        let unchanged = send_custom(conn.cx(), "_goose/esi/model-profile/read", target.clone())
+            .await
+            .unwrap();
+        assert_eq!(saved["profile"], unchanged["profile"]);
+        assert!(send_custom(
+            conn.cx(),
+            "_goose/esi/model-profile/thinking",
+            serde_json::json!({
+                "provider":provider, "model":"manual", "effort":"off"
+            })
+        )
+        .await
+        .is_err());
+        assert!(send_custom(
+            conn.cx(),
+            "_goose/esi/model-profile/save",
+            serde_json::json!({
+                "provider":"openai", "model":"manual", "profile":{}
+            })
+        )
+        .await
+        .is_err());
+        send_custom(
+            conn.cx(),
+            "_goose/esi/model-profile/save",
+            serde_json::json!({
+                "provider":provider, "model":"manual", "profile":null
+            }),
+        )
+        .await
+        .unwrap();
+        let reset = send_custom(conn.cx(), "_goose/esi/model-profile/read", target)
+            .await
+            .unwrap();
+        assert!(reset["profile"].is_null());
+    });
+}
 
 fn write_acp_global_config(contents: &str) -> PathBuf {
     std::env::set_var("GOOSE_PATH_ROOT", ACP_CONFIG_ROOT.path());
@@ -544,7 +698,7 @@ fn test_steer_session_adds_input_to_active_prompt() {
         // steer queued before the turn ends keeps the loop alive (it flips
         // `exit_chat` back to false), so a second provider request fires whose
         // body must now contain the steered text.
-        let openai = OpenAiFixture::new(
+        let openai = OpenAiFixture::with_response_delay(
             vec![
                 (
                     "start work".to_string(),
@@ -556,6 +710,9 @@ fn test_steer_session_adds_input_to_active_prompt() {
                 ),
             ],
             Arc::new(IgnoreSessionId),
+            // The observer polls every 10ms. An instantaneous mock can finish
+            // before its first poll, testing scheduler luck instead of steering.
+            Duration::from_millis(200),
         )
         .await;
         let mut conn = AcpServerConnection::new(TestConnectionConfig::default(), openai).await;

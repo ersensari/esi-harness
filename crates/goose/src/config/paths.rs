@@ -39,7 +39,20 @@ impl Paths {
     }
 
     pub(crate) fn path_root() -> Option<PathBuf> {
-        Self::validated_path_root(std::env::var_os("GOOSE_PATH_ROOT"))
+        let explicit_root = Self::validated_path_root(std::env::var_os("GOOSE_PATH_ROOT"));
+        #[cfg(test)]
+        let explicit_root = explicit_root.or_else(|| Some(Self::test_path_root()));
+        explicit_root
+    }
+
+    #[cfg(test)]
+    fn test_path_root() -> PathBuf {
+        // Source CRUD can reach Config::global() even when discovery uses an
+        // injected Config. Keep that first singleton initialization off the
+        // real user directory without mutating the process environment.
+        static ROOT: std::sync::LazyLock<tempfile::TempDir> =
+            std::sync::LazyLock::new(|| tempfile::tempdir().expect("test path root"));
+        ROOT.path().to_path_buf()
     }
 
     fn validated_path_root(value: Option<OsString>) -> Option<PathBuf> {
@@ -125,5 +138,16 @@ mod tests {
         assert_eq!(args.top_level_domain, "ESI");
         assert_eq!(args.author, "ESI");
         assert_eq!(args.app_name, "esi-studio");
+    }
+
+    #[test]
+    fn unit_tests_without_an_override_use_a_stable_temporary_root() {
+        let _guard = env_lock::lock_env([("GOOSE_PATH_ROOT", None::<&str>)]);
+        let root = Paths::path_root().unwrap();
+        assert!(root.is_absolute());
+        assert!(root.is_dir());
+        assert_eq!(Paths::path_root(), Some(root.clone()));
+        assert_eq!(Paths::config_dir(), root.join("config"));
+        assert_eq!(Paths::plugins_dir(), root.join(".agents/plugins"));
     }
 }

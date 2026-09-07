@@ -1,6 +1,8 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 
+require('../../scripts/test-environment.cjs').assertIsolatedTestEnvironment();
+
 export default defineConfig({
   resolve: {
     alias: {

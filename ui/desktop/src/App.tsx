@@ -12,6 +12,7 @@ import TelemetryConsentPrompt from './components/TelemetryConsentPrompt';
 import OnboardingGuard from './components/onboarding/OnboardingGuard';
 import { createSession } from './sessions';
 import { acpListSessions, acpDeleteSession } from './acp/sessions';
+import { applyInitialChatThinking } from './acp/modelProfiles';
 
 import { ChatType } from './types/chat';
 import Hub from './components/Hub';
@@ -117,6 +118,7 @@ export const PairRouteWrapper = ({
             allExtensions: extensionsList,
           });
           const sessionInitialMessage = resolveSessionInitialMessage(newSession, initialMessage);
+          await applyInitialChatThinking(newSession, initialMessage);
 
           window.dispatchEvent(
             new CustomEvent(AppEvents.ADD_ACTIVE_SESSION, {

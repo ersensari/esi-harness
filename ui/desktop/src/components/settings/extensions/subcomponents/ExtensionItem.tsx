@@ -82,7 +82,9 @@ export default function ExtensionItem({
 
   // allow configuration editing if extension is not a builtin/bundled extension AND isStatic = false
   const editable =
-    !(extension.type === 'builtin' || ('bundled' in extension && extension.bundled)) && !isStatic;
+    !isStatic &&
+    ((extension.name === 'esi-wiki' && extension.type === 'streamable_http') ||
+      !(extension.type === 'builtin' || ('bundled' in extension && extension.bundled)));
 
   return (
     <Card

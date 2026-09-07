@@ -309,7 +309,7 @@ fn html_is_self_contained_and_renders_required_content_regions() {
 async fn mcp_tool_loads_validated_persisted_state_as_structured_content() {
     let temp = TempDir::new().unwrap();
     let state_path = temp.path().join("state.json");
-    let state = state_with_validator(temp.path(), "/bin/true", RepairPolicy::default());
+    let mut state = state_with_validator(temp.path(), "/bin/true", RepairPolicy::default());
     state.save(&state_path).unwrap();
     let result = DevelopmentVisualizerServer::new()
         .show_development_loop(Parameters(ShowDevelopmentLoopParams {
@@ -363,7 +363,7 @@ async fn workspace_path_automatically_falls_back_to_a_live_snapshot() {
 #[tokio::test]
 async fn workspace_path_discovers_controller_state() {
     let temp = TempDir::new().unwrap();
-    let state = state_with_validator(temp.path(), "/bin/true", RepairPolicy::default());
+    let mut state = state_with_validator(temp.path(), "/bin/true", RepairPolicy::default());
     let state_dir = temp.path().join(".esi");
     fs::create_dir_all(&state_dir).unwrap();
     state

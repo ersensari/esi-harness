@@ -27,6 +27,7 @@ target/
 # UI
 node_modules
 ./ui/desktop/out
+/ui/desktop/coverage/
 
 # Generated goose DLLs (built at build time, not checked in)
 ui/desktop/src/bin/goose_ffi.dll

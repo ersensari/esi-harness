@@ -133,6 +133,10 @@ impl PermissionInspector {
 
 #[async_trait]
 impl ToolInspector for PermissionInspector {
+    fn is_required(&self) -> bool {
+        true
+    }
+
     fn name(&self) -> &'static str {
         "permission"
     }

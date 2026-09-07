@@ -2,6 +2,8 @@ import { Sliders, Bot, LoaderCircle, Settings, History } from 'lucide-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useModelAndProvider } from '../../../ModelAndProviderContext';
 import { SwitchModelModal } from '../subcomponents/SwitchModelModal';
+import { ModelProfileControls } from '../ModelProfileControls';
+import type { ProfileThinking } from '../../../../acp/modelProfiles';
 import { View } from '../../../../utils/navigationUtils';
 import {
   DropdownMenu,
@@ -66,6 +68,10 @@ interface ModelsBottomBarProps {
   latestInference?: Message['metadata']['inference'] | null;
   onModelChanged: (override: { model: string; provider: string }) => void;
   sessionLoaded?: boolean;
+  busy?: boolean;
+  initialThinking?: ProfileThinking;
+  onInitialThinkingChange?: (effort: ProfileThinking | null) => void;
+  onContextResolved?: (limit: number) => void;
 }
 
 type ModelMenuModal = 'switch-model' | 'local-model-settings';
@@ -79,6 +85,10 @@ export default function ModelsBottomBar({
   latestInference,
   onModelChanged,
   sessionLoaded,
+  busy,
+  initialThinking,
+  onInitialThinkingChange,
+  onContextResolved,
 }: ModelsBottomBarProps) {
   // ChatInput owns the override state and passes effective model/provider as sessionModel/sessionProvider.
   // Fall back to config defaults when no session-specific model is available.
@@ -196,13 +206,14 @@ export default function ModelsBottomBar({
       fetchModelReasoning(recent.provider, recent.model),
       acpReadThinkingEffort().catch(() => null),
     ]);
-    const modelArg = reasoning
-      ? {
-          name: recent.model,
-          provider: recent.provider,
-          request_params: { thinking_effort: savedEffort ?? 'off' },
-        }
-      : { name: recent.model, provider: recent.provider };
+    const modelArg =
+      reasoning && !recent.provider.startsWith('custom_')
+        ? {
+            name: recent.model,
+            provider: recent.provider,
+            request_params: { thinking_effort: savedEffort ?? 'off' },
+          }
+        : { name: recent.model, provider: recent.provider };
     const success = await changeModel(sessionId, modelArg);
     if (success) {
       trackModelChanged(recent.provider, recent.model);
@@ -292,6 +303,19 @@ export default function ModelsBottomBar({
           )}
         </DropdownMenuContent>
       </DropdownMenu>
+
+      {currentProvider?.startsWith('custom_') && currentModel && !isModelLoading && (
+        <ModelProfileControls
+          key={`${currentProvider}/${currentModel}/${sessionId ?? ''}`}
+          provider={currentProvider}
+          model={currentModel}
+          sessionId={sessionId}
+          busy={busy}
+          initialThinking={initialThinking}
+          onInitialThinkingChange={onInitialThinkingChange}
+          onContextResolved={onContextResolved}
+        />
+      )}
 
       {isAddModelModalOpen ? (
         <SwitchModelModal

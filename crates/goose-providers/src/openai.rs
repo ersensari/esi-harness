@@ -17,9 +17,7 @@ use crate::formats::openai_responses::{
 };
 use crate::http_status::read_json_response;
 use crate::images::ImageFormat;
-use crate::openai_compatible::{
-    handle_response_openai_compat, handle_status, stream_openai_compat, stream_responses_compat,
-};
+use crate::openai_compatible::{handle_status, stream_openai_compat, stream_responses_compat};
 use crate::request_log::{start_log, LoggerHandleExt};
 use crate::thinking::ThinkingEffort;
 use anyhow::Result;
@@ -32,6 +30,8 @@ use std::sync::{Arc, Mutex};
 use crate::base::{MessageStream, ProviderDescriptor};
 use crate::model::ModelConfig;
 use rmcp::model::Tool;
+
+mod discovery;
 
 pub const OPEN_AI_PROVIDER_NAME: &str = "openai";
 pub const OPEN_AI_DEFAULT_BASE_PATH: &str = "v1/chat/completions";
@@ -569,19 +569,13 @@ impl OpenAiProvider {
         parse_model_ids(&json)
     }
 
-    /// llama.cpp and Ollama expose the actual allocated context window in the
-    /// non-standard `meta.n_ctx` field of `/v1/models`. Returns `None` when absent
+    /// llama.cpp exposes `meta.n_ctx`; Unsloth exposes `context_length` in
+    /// `/v1/models`. Returns `None` when absent
     /// (e.g. real OpenAI).
     async fn fetch_n_ctx_from_api(&self, model_name: &str) -> Option<usize> {
         let models_path =
             Self::map_base_path(&self.base_path, "models", OPEN_AI_DEFAULT_MODELS_PATH);
-        let response = self
-            .api_client
-            .request(&models_path)
-            .response_get()
-            .await
-            .ok()?;
-        let json = handle_response_openai_compat(response).await.ok()?;
+        let json = self.metadata_json(&models_path).await?;
         parse_n_ctx_from_models(&json, model_name)
     }
 }
@@ -608,10 +602,15 @@ fn parse_n_ctx_from_models(json: &serde_json::Value, model_name: &str) -> Option
 
     let n_ctx = |entry: &serde_json::Value| -> Option<usize> {
         entry
-            .get("meta")?
-            .get("n_ctx")?
-            .as_u64()
-            .map(|v| v as usize)
+            .pointer("/meta/n_ctx")
+            .or_else(|| {
+                (entry.get("owned_by").and_then(|v| v.as_str()) == Some("unsloth-studio"))
+                    .then(|| entry.get("context_length"))
+                    .flatten()
+            })
+            .and_then(|v| v.as_u64())
+            .and_then(|v| usize::try_from(v).ok())
+            .filter(|v| *v > 0)
     };
 
     if let Some(entry) = data
@@ -699,6 +698,30 @@ impl Provider for OpenAiProvider {
     /// `meta.n_ctx` field, which fixes auto-compaction for local servers that
     /// would otherwise fall back to DEFAULT_CONTEXT_LIMIT. The probe is bounded
     /// by a short timeout so a hung endpoint can't stall the caller.
+    async fn advertised_context_limit(&self, model_name: &str) -> Option<usize> {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.fetch_n_ctx_from_api(model_name),
+        )
+        .await
+        .ok()
+        .flatten()
+        .filter(|limit| *limit > 0)
+    }
+
+    async fn advertised_model_profile(
+        &self,
+        model_name: &str,
+    ) -> Option<crate::model_profile::ModelProfile> {
+        tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            self.discover_profile(model_name),
+        )
+        .await
+        .ok()
+        .flatten()
+    }
+
     async fn get_context_limit(&self, model_config: &ModelConfig) -> Result<usize, ProviderError> {
         if let Some(limit) = model_config.context_limit {
             return Ok(limit);
@@ -714,10 +737,20 @@ impl Provider for OpenAiProvider {
         }
 
         const N_CTX_PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
-        let probed = tokio::time::timeout(
-            N_CTX_PROBE_TIMEOUT,
-            self.fetch_n_ctx_from_api(&model_config.model_name),
-        )
+        let probed = tokio::time::timeout(N_CTX_PROBE_TIMEOUT, async {
+            // Manual profiles may intentionally leave context on Auto. Resolve
+            // the same rich metadata used by the editor, not a different fallback.
+            if self.name.starts_with("custom_") {
+                if let Some(limit) = self
+                    .advertised_model_profile(&model_config.model_name)
+                    .await
+                    .and_then(|profile| profile.context_limit)
+                {
+                    return Some(limit);
+                }
+            }
+            self.fetch_n_ctx_from_api(&model_config.model_name).await
+        })
         .await
         .ok()
         .flatten();
@@ -784,8 +817,12 @@ impl Provider for OpenAiProvider {
                 &ImageFormat::OpenAi,
                 self.supports_streaming,
                 OpenAiFormatOptions {
-                    preserve_thinking_context: self.preserve_thinking_context
-                        || thinking_preservation_format.is_some(),
+                    preserve_thinking_context: model_config
+                        .request_param::<bool>("preserve_thinking_context")
+                        .unwrap_or(
+                            self.preserve_thinking_context
+                                || thinking_preservation_format.is_some(),
+                        ),
                     supports_vision: model_config.supports_vision.unwrap_or_default(),
                     thinking_preservation_format,
                 },
@@ -1399,6 +1436,17 @@ mod tests {
             ]
         });
         assert_eq!(parse_n_ctx_from_models(&body, "qwen3"), Some(32768));
+    }
+
+    #[test]
+    fn unsloth_context_uses_allocated_not_native_or_maximum_limit() {
+        let body = serde_json::json!({"data": [{"id":"manual", "owned_by":"unsloth-studio",
+            "context_length":32768, "native_context_length":262144, "max_context_length":1048576}]});
+        assert_eq!(parse_n_ctx_from_models(&body, "manual"), Some(32768));
+        let invalid = serde_json::json!({"data":[{"id":"manual","owned_by":"unsloth-studio","context_length":0}]});
+        assert_eq!(parse_n_ctx_from_models(&invalid, "manual"), None);
+        let maximum_only = serde_json::json!({"data":[{"id":"manual","owned_by":"unsloth-studio","max_context_length":1048576}]});
+        assert_eq!(parse_n_ctx_from_models(&maximum_only, "manual"), None);
     }
 
     #[test]

@@ -122,6 +122,7 @@ fn resolve_timeout(timeout: Option<u64>) -> u64 {
 }
 
 struct Extension {
+    authority: Option<crate::workspace_tool_authority::Factory>,
     pub config: ExtensionConfig,
     /// Resolved config snapshot (with secrets from keyring substituted)
     /// captured at client-creation time. Used to detect secret rotation
@@ -143,6 +144,7 @@ impl Extension {
         temp_dir: Option<tempfile::TempDir>,
     ) -> Self {
         Self {
+            authority: None,
             client,
             config,
             resolved_config,
@@ -193,7 +195,9 @@ pub(crate) const TRUSTED_TOOL_UPDATE_META_KEY: &str = "__goose_tool_update_meta"
 
 /// Manages goose extensions / MCP clients and their interactions
 pub struct ExtensionManager {
-    extensions: Mutex<HashMap<String, Extension>>,
+    managed_authority: bool,
+    authority_permissions: Option<Arc<crate::config::permission::PermissionManager>>,
+    extensions: Arc<Mutex<HashMap<String, Extension>>>,
     context: PlatformExtensionContext,
     provider: SharedProvider,
     tools_cache: Mutex<Option<Arc<Vec<Tool>>>>,
@@ -1384,7 +1388,9 @@ impl ExtensionManager {
         use_login_shell_path: bool,
     ) -> Self {
         Self {
-            extensions: Mutex::new(HashMap::new()),
+            managed_authority: false,
+            authority_permissions: None,
+            extensions: Arc::new(Mutex::new(HashMap::new())),
             context: PlatformExtensionContext {
                 extension_manager: None,
                 session_manager,
@@ -1398,6 +1404,20 @@ impl ExtensionManager {
             client_name,
             capabilities,
         }
+    }
+
+    pub(crate) fn with_managed_authority(
+        mut self,
+        enabled: bool,
+        permissions: Arc<crate::config::permission::PermissionManager>,
+    ) -> Self {
+        self.managed_authority = enabled;
+        self.authority_permissions = Some(permissions);
+        self
+    }
+
+    pub(crate) fn has_managed_authority(&self) -> bool {
+        self.managed_authority
     }
 
     pub fn new_without_provider(data_dir: std::path::PathBuf) -> Self {
@@ -1445,6 +1465,18 @@ impl ExtensionManager {
     ) -> ExtensionResult<()> {
         let sanitized_name = config.key();
 
+        if self.managed_authority
+            && !(matches!(
+                config,
+                ExtensionConfig::Builtin { .. } | ExtensionConfig::Platform { .. }
+            ) && crate::workspace_tool_authority::Factory::registered(&sanitized_name)
+                .is_some())
+        {
+            return Err(ExtensionError::ConfigError(
+                "ESI authority: this extension has no contained execution policy. Official Codex/Claude provider delegation is separate and remains available.".into(),
+            ));
+        }
+
         // Compare both the unresolved config (to detect structural changes like
         // migrating from plaintext envs to env_keys) and the resolved config (to
         // detect secret rotation where only keyring values changed). Only skip
@@ -1462,6 +1494,7 @@ impl ExtensionManager {
         }
 
         let mut temp_dir = None;
+        let mut authority = None;
 
         let effective_working_dir = working_dir
             .clone()
@@ -1545,6 +1578,8 @@ impl ExtensionManager {
                     let Some(client) = (def.client_factory)(context) else {
                         return Ok(());
                     };
+                    authority =
+                        crate::workspace_tool_authority::Factory::registered(&normalized_name);
                     client
                 } else {
                     // Builtin MCP server extension
@@ -1713,13 +1748,16 @@ impl ExtensionManager {
         let mut extensions = self.extensions.lock().await;
         extensions.insert(
             sanitized_name,
-            Extension::new(
-                config,
-                resolved_config,
-                Arc::from(client),
-                server_info,
-                temp_dir,
-            ),
+            Extension {
+                authority,
+                ..Extension::new(
+                    config,
+                    resolved_config,
+                    Arc::from(client),
+                    server_info,
+                    temp_dir,
+                )
+            },
         );
         drop(extensions);
         self.invalidate_tools_cache_and_bump_version().await;
@@ -2365,6 +2403,10 @@ impl ExtensionManager {
     ) -> std::result::Result<ToolCallResult, ErrorData> {
         let tool_name_str = tool_call.name.to_string();
         let resolved = self.resolve_tool(&ctx.session_id, &tool_name_str).await?;
+        let authority_registry = self.extensions.clone();
+        let managed_authority = self.managed_authority;
+        let authority_permissions = self.authority_permissions.clone();
+        let authority_sessions = self.context.session_manager.clone();
 
         if let Some(extension) = self.extensions.lock().await.get(&resolved.extension_name) {
             if !extension
@@ -2447,6 +2489,59 @@ impl ExtensionManager {
             };
 
         let fut = async move {
+            if managed_authority {
+                let permissions = authority_permissions.as_ref().ok_or_else(|| {
+                    ErrorData::new(
+                        ErrorCode::INVALID_REQUEST,
+                        "ESI authority: missing permission authority",
+                        None,
+                    )
+                })?;
+                crate::workspace_tool_authority::check_permission(
+                    permissions,
+                    &authority_sessions,
+                    &owned_ctx,
+                    &resolved_tool.extension_name,
+                    &actual_tool_name,
+                    &arguments,
+                    &cancellation_token,
+                )
+                .await
+                .map_err(|error| {
+                    ErrorData::new(
+                        ErrorCode::INVALID_REQUEST,
+                        format!("ESI authority: {error}"),
+                        None,
+                    )
+                })?;
+                let authority = {
+                    let registry = authority_registry.lock().await;
+                    registry
+                        .get(&resolved_tool.extension_name)
+                        .filter(|extension| {
+                            Arc::ptr_eq(&extension.client, &client)
+                                && extension.config.is_tool_available(&actual_tool_name)
+                        })
+                        .and_then(|extension| extension.authority)
+                };
+                return crate::workspace_tool_authority::execute(
+                    authority,
+                    &authority_sessions,
+                    &owned_ctx,
+                    &actual_tool_name,
+                    arguments,
+                    client.as_ref(),
+                    cancellation_token,
+                )
+                .await
+                .map_err(|error| {
+                    ErrorData::new(
+                        ErrorCode::INVALID_REQUEST,
+                        format!("ESI authority: {error}"),
+                        None,
+                    )
+                });
+            }
             tracing::debug!(
                 "dispatch_tool_call: calling client.call_tool tool={} session_id={} working_dir={:?}",
                 actual_tool_name,

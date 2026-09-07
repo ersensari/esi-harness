@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use thiserror::Error;
 
-pub(crate) const SCHEMA_VERSION: u32 = 2;
+pub(crate) const SCHEMA_VERSION: u32 = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -316,6 +316,10 @@ pub struct DevelopmentEvent {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DevelopmentState {
     pub(crate) schema_version: u32,
+    #[serde(default)]
+    pub(crate) storage_revision: u64,
+    #[serde(skip)]
+    pub(crate) persisted_snapshot: Option<esi_workspace_plan::storage::Snapshot>,
     pub(crate) run_id: String,
     pub(crate) stage: DevelopmentStage,
     pub(crate) brief: Option<Brief>,
@@ -336,6 +340,8 @@ pub struct DevelopmentState {
 
 #[derive(Debug, Error)]
 pub enum DevelopmentError {
+    #[error(transparent)]
+    Persistence(#[from] esi_workspace_plan::storage::PersistenceError),
     #[error("invalid development transition from {from:?} to {to:?}")]
     InvalidTransition {
         from: DevelopmentStage,

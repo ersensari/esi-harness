@@ -926,8 +926,6 @@
   "dirSwitcher.enterPathInvalid": {
     "defaultMessage": "Working directory must be an absolute path"
   },
-
-
   "dirSwitcher.failedToUpdateWorkingDir": {
     "defaultMessage": "作業ディレクトリの更新に失敗しました"
   },
@@ -4695,5 +4693,149 @@
   },
   "providerConfigurationModal.deviceCodeVisit": {
     "defaultMessage": "次のURLにアクセスし、"
+  },
+  "modelProfile.apply": {
+    "defaultMessage": "Apply saved profile to this chat"
+  },
+  "modelProfile.auto": {
+    "defaultMessage": "Server default"
+  },
+  "modelProfile.catalog": {
+    "defaultMessage": "model catalog"
+  },
+  "modelProfile.context": {
+    "defaultMessage": "Context limit (tokens)"
+  },
+  "modelProfile.contextInfo": {
+    "defaultMessage": "Effective context: {limit} · source: {source}"
+  },
+  "modelProfile.extended": {
+    "defaultMessage": "My server supports top-k and min-p"
+  },
+  "modelProfile.fallback": {
+    "defaultMessage": "fallback estimate (not detected)"
+  },
+  "modelProfile.frequency": {
+    "defaultMessage": "Frequency penalty"
+  },
+  "modelProfile.global": {
+    "defaultMessage": "global setting"
+  },
+  "modelProfile.high": {
+    "defaultMessage": "High"
+  },
+  "modelProfile.max": {
+    "defaultMessage": "Maximum"
+  },
+  "modelProfile.repetition": {
+    "defaultMessage": "Repetition penalty"
+  },
+  "modelProfile.detected": {
+    "defaultMessage": "Provider defaults detected. Saving creates a manual profile; Reset restores automatic settings."
+  },
+  "modelProfile.undetected": {
+    "defaultMessage": "Provider settings unavailable or not advertised. Manual settings and existing defaults remain available."
+  },
+  "modelProfile.refresh": {
+    "defaultMessage": "Refresh provider settings"
+  },
+  "modelProfile.low": {
+    "defaultMessage": "Low"
+  },
+  "modelProfile.manual": {
+    "defaultMessage": "model profile"
+  },
+  "modelProfile.medium": {
+    "defaultMessage": "Medium"
+  },
+  "modelProfile.minP": {
+    "defaultMessage": "Min-p"
+  },
+  "modelProfile.none": {
+    "defaultMessage": "Not configured / unsupported"
+  },
+  "modelProfile.off": {
+    "defaultMessage": "Off"
+  },
+  "modelProfile.on": {
+    "defaultMessage": "On"
+  },
+  "modelProfile.output": {
+    "defaultMessage": "Maximum output (tokens)"
+  },
+  "modelProfile.presence": {
+    "defaultMessage": "Presence penalty"
+  },
+  "modelProfile.preserve": {
+    "defaultMessage": "Preserve returned thinking in conversation context"
+  },
+  "modelProfile.preserveHelp": {
+    "defaultMessage": "Replays reasoning returned by the server; requires server support. This does not enable thinking."
+  },
+  "modelProfile.protocol": {
+    "defaultMessage": "Thinking API supported by this model/server"
+  },
+  "modelProfile.reset": {
+    "defaultMessage": "Reset profile"
+  },
+  "modelProfile.save": {
+    "defaultMessage": "Save profile"
+  },
+  "modelProfile.saveApply": {
+    "defaultMessage": "Save and apply to this chat"
+  },
+  "modelProfile.scope": {
+    "defaultMessage": "Saved only for this provider and exact model name. Empty fields use existing defaults. This does not resize server context or VRAM."
+  },
+  "modelProfile.server": {
+    "defaultMessage": "server metadata"
+  },
+  "modelProfile.settings": {
+    "defaultMessage": "Model settings"
+  },
+  "modelProfile.temperature": {
+    "defaultMessage": "Temperature"
+  },
+  "modelProfile.thinking": {
+    "defaultMessage": "Thinking"
+  },
+  "modelProfile.topK": {
+    "defaultMessage": "Top-k (-1 or 0 disables, depending on server)"
+  },
+  "modelProfile.topP": {
+    "defaultMessage": "Top-p"
+  },
+  "modelProfile.wait": {
+    "defaultMessage": "Settings apply between responses. Start a chat to use its thinking selector."
+  },
+  "modelProfile.warning": {
+    "defaultMessage": "The client limit exceeds the server-reported allocation ({limit}). Reduce the client limit or configure the server separately."
+  },
+  "wikiSession.busy": {
+    "defaultMessage": "Signing in…"
+  },
+  "wikiSession.failure": {
+    "defaultMessage": "Wiki sign-in failed. Check your credentials and the saved, enabled endpoint. HTTPS or local loopback HTTP is required."
+  },
+  "wikiSession.handle": {
+    "defaultMessage": "Wiki handle"
+  },
+  "wikiSession.note": {
+    "defaultMessage": "Sign in to the saved, enabled Wiki endpoint. Save endpoint changes first. Credentials are not sent to chat."
+  },
+  "wikiSession.password": {
+    "defaultMessage": "Wiki password"
+  },
+  "wikiSession.renew": {
+    "defaultMessage": "Renew Wiki session"
+  },
+  "wikiSession.success": {
+    "defaultMessage": "Wiki authorization updated. Retry pending plan capture. Existing Wiki tool connections may need reconnecting."
+  },
+  "wikiSession.title": {
+    "defaultMessage": "Wiki session"
+  },
+  "modelProfile.session": {
+    "defaultMessage": "saved chat setting"
   }
 }

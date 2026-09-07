@@ -244,7 +244,7 @@ fn disallowed_transitions() {
 #[test]
 fn save_and_load_round_trip() {
     let ws = workspace();
-    let plan = approved_plan(&ws);
+    let mut plan = approved_plan(&ws);
     plan.save(ws.path()).unwrap();
 
     assert!(WorkspacePlan::exists(ws.path()));
@@ -273,7 +273,7 @@ fn exists_returns_false_for_empty_workspace() {
 #[test]
 fn save_creates_esi_directory() {
     let ws = workspace();
-    let plan = discovery_plan(&ws);
+    let mut plan = discovery_plan(&ws);
     plan.save(ws.path()).unwrap();
     assert!(ws.path().join(".esi").is_dir());
     assert!(ws.path().join(".esi/workspace-plan.json").is_file());
@@ -403,7 +403,7 @@ fn standalone_gate_blocks_no_plan() {
 #[test]
 fn standalone_gate_blocks_unapproved_plan() {
     let ws = workspace();
-    let plan = planning_plan(&ws);
+    let mut plan = planning_plan(&ws);
     plan.save(ws.path()).unwrap();
 
     let result = check_workspace_plan_gate(ws.path());
@@ -413,7 +413,7 @@ fn standalone_gate_blocks_unapproved_plan() {
 #[test]
 fn standalone_gate_allows_approved_plan() {
     let ws = workspace();
-    let plan = approved_plan(&ws);
+    let mut plan = approved_plan(&ws);
     plan.save(ws.path()).unwrap();
 
     check_workspace_plan_gate(ws.path()).unwrap();

@@ -15,6 +15,9 @@ activities:
   - Test delegate tool for task delegation (sync and async)
   - Test multi-turn thinking preservation for providers that reject replayed reasoning_content
   - Validate ACP thinking-effort discovery, forwarding, and provider switching
+  - Validate ESI custom model profiles and isolated chat thinking overrides
+  - Validate ESI plan/controller state concurrency and crash recovery
+  - Validate required authority gate failures block both agent loops
   - Test error boundaries including nested delegation prevention
   - Generate comprehensive test report
 
@@ -23,7 +26,7 @@ parameters:
     input_type: string
     requirement: optional
     default: "all"
-    description: "Which test phases to run: all, basic, extensions, delegation, reasoning, acp-effort, advanced"
+    description: "Which test phases to run: all, basic, extensions, delegation, reasoning, acp-effort, model-profiles, state-concurrency, tool-authority, advanced"
 
   - key: test_depth
     input_type: string
@@ -413,6 +416,73 @@ prompt: |
      managed providers preserve values they support.
 
   Log results to: {{ workspace_dir }}/phase3d_acp_effort.md
+  {% endif %}
+
+  {% if test_phases == "all" or "model-profiles" in test_phases %}
+  ## ESI Custom Model Profiles
+
+  Run from the Studio source checkout with its Hermit toolchain. Use only
+  disposable configuration; do not read or change real provider credentials.
+  Execute these deterministic checks through the existing isolated runner:
+  1. `node scripts/test-isolated.mjs cargo test --locked --release -p goose-provider-types --test model_profiles`
+  2. `node scripts/test-isolated.mjs cargo test --locked --release -p goose --test model_profiles`
+  3. `node scripts/test-isolated.mjs cargo test --locked --release -p goose --test acp_custom_requests_test model_profiles_private`
+  Verify every command succeeds and reports the protected config digest unchanged.
+  Confirm Unsloth off/on wire values, exact model identity, per-model persistence,
+  invalid-setting rejection and server/manual context provenance in the test output.
+  No model-server reload or additional provider registration is needed outside fixtures.
+  Record exact commands and results in {{ workspace_dir }}/model_profiles.md.
+  Missing prerequisites or failed checks must be reported as BLOCKED/FAIL, not PASS.
+  {% endif %}
+
+  {% if test_phases == "all" or "provider-discovery" in test_phases %}
+  ## ESI Provider Model Discovery
+
+  Use the Hermit toolchain and isolated runner; do not alter live providers.
+  1. `node scripts/test-isolated.mjs cargo test --locked --release -p goose-provider-types --test model_profiles`
+  2. `node scripts/test-isolated.mjs cargo test --locked --release -p goose-providers --lib discovery`
+  3. `node scripts/test-isolated.mjs cargo test --locked --release -p goose --test model_profiles`
+  Verify authenticated bounded discovery, advertised wire values, exact model
+  matching, unavailable metadata, manual priority and preserved session snapshots.
+  All commands must pass with unchanged config digests. Record actual results in
+  {{ workspace_dir }}/provider_discovery.md; never mark filtered-out tests as run.
+  {% endif %}
+
+  {% if test_phases == "all" or "state-concurrency" in test_phases %}
+  ## ESI State Concurrency
+
+  Run from the Studio source checkout with its Hermit toolchain and disposable
+  configuration. Never modify live workspace state or provider credentials.
+  1. `node scripts/test-isolated.mjs cargo test --locked -p esi-workspace-plan -p esi-development`
+  2. `node scripts/test-isolated.mjs cargo test --locked -p esi-development-visualizer`
+  3. `node scripts/test-isolated.mjs cargo test --locked --release -p goose --lib workspace_plan`
+  Require passing tests and an unchanged protected configuration digest.
+  Verify independent-process create/update races, stale outbox conflicts,
+  bounded lock contention, process-death recovery, pending-file handling,
+  legacy schema migration, and approval/ownership gate regressions.
+  Record exact commands and results in {{ workspace_dir }}/state_concurrency.md.
+  Missing prerequisites or failed checks are BLOCKED/FAIL, never PASS.
+  {% endif %}
+
+  {% if test_phases == "all" or "tool-authority" in test_phases %}
+  ## ESI Required Authority Gates
+
+  Run from the Studio source checkout with Hermit and disposable configuration.
+  1. `node scripts/test-isolated.mjs cargo test --locked --release -p goose --test tool_inspection_manager_tests --test tool_inspection_permission_precedence`
+  2. `node scripts/test-isolated.mjs cargo test --locked --release -p goose --lib authority_`
+  3. `node scripts/test-isolated.mjs cargo test --locked --release -p goose --lib workspace_plan`
+  Require passing tests and unchanged protected configuration digests.
+  Verify required-gate failure and disabled-gate denials cannot be overridden
+  by preapproval, either inspector order, or Auto/Approve/SmartApprove modes.
+  The both-loop fixtures must dispatch no calculator mutations after gate failure
+  or untrusted registration. Exercise actual ACP app dispatch, exact human
+  approval and replay/stale-revision rejection, queued revocation, contained
+  local discovery/write/edit/shell, outside/control/symlink/hardlink escapes,
+  cancellation/output limits and trusted official Codex/Claude factory policy.
+  Record results in {{ workspace_dir }}/tool_authority.md. Missing checks are
+  BLOCKED/FAIL. Linux bubblewrap is required; never skip containment tests or
+  fall back to host execution. Provider-native Codex/Claude execution remains
+  explicitly trusted and is not claimed to be contained by Studio.
   {% endif %}
 
   {% if test_phases == "all" or "advanced" in test_phases %}

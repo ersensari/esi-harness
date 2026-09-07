@@ -1692,6 +1692,14 @@ pub fn create_request_with_options(
     format_options: OpenAiFormatOptions,
 ) -> anyhow::Result<Value, Error> {
     let (wire_model_name, _) = extract_reasoning_effort(&model_config.model_name);
+    let wire_model_name = if model_config
+        .request_param::<crate::model_profile::ModelProfile>(crate::model_profile::PROFILE_PARAM)
+        .is_some()
+    {
+        model_config.model_name.clone()
+    } else {
+        wire_model_name
+    };
     create_request_for_model_with_options(
         model_config,
         &wire_model_name,
@@ -1804,6 +1812,7 @@ pub fn create_request_for_model_with_options(
         }
     }
 
+    crate::model_profile::apply_profile_thinking(&mut payload, model_config)?;
     Ok(payload)
 }
 

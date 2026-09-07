@@ -816,9 +816,15 @@ impl GooseAcpAgent {
             let provider_factory = Arc::clone(&self.provider_factory);
             let provider_id = refresh_job.provider_id.clone();
             let identity = refresh_job.identity.clone();
+            let managed_authority = self.managed_authority;
             tokio::spawn(async move {
                 let mut refresh_guard = provider_inventory.refresh_guard(&identity);
                 let provider_result = AssertUnwindSafe(async {
+                    if managed_authority {
+                        crate::providers::get_from_registry(&provider_id)
+                            .await?
+                            .require_studio_execution()?;
+                    }
                     provider_factory(provider_id.clone(), Vec::new(), None, true).await
                 })
                 .catch_unwind()

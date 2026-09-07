@@ -926,8 +926,6 @@
   "dirSwitcher.enterPathInvalid": {
     "defaultMessage": "Working directory must be an absolute path"
   },
-
-
   "dirSwitcher.failedToUpdateWorkingDir": {
     "defaultMessage": "Çalışma dizini güncellenemedi"
   },
@@ -4695,5 +4693,149 @@
   },
   "providerConfigurationModal.deviceCodeVisit": {
     "defaultMessage": "Ziyaret edin"
+  },
+  "modelProfile.apply": {
+    "defaultMessage": "Kayıtlı profili bu sohbete uygula"
+  },
+  "modelProfile.auto": {
+    "defaultMessage": "Sunucu varsayılanı"
+  },
+  "modelProfile.catalog": {
+    "defaultMessage": "model kataloğu"
+  },
+  "modelProfile.context": {
+    "defaultMessage": "Context limiti (token)"
+  },
+  "modelProfile.contextInfo": {
+    "defaultMessage": "Etkin context: {limit} · kaynak: {source}"
+  },
+  "modelProfile.extended": {
+    "defaultMessage": "Sunucum top-k ve min-p destekliyor"
+  },
+  "modelProfile.fallback": {
+    "defaultMessage": "varsayılan tahmin (tespit edilemedi)"
+  },
+  "modelProfile.frequency": {
+    "defaultMessage": "Sıklık cezası (frequency penalty)"
+  },
+  "modelProfile.global": {
+    "defaultMessage": "genel ayar"
+  },
+  "modelProfile.high": {
+    "defaultMessage": "Yüksek"
+  },
+  "modelProfile.max": {
+    "defaultMessage": "En yüksek"
+  },
+  "modelProfile.repetition": {
+    "defaultMessage": "Tekrar cezası (repetition penalty)"
+  },
+  "modelProfile.detected": {
+    "defaultMessage": "Provider varsayılanları algılandı. Kaydetmek manuel profil oluşturur; profili sıfırlamak otomatik ayarlara döndürür."
+  },
+  "modelProfile.undetected": {
+    "defaultMessage": "Provider ayarlarına erişilemiyor veya provider bunları yayınlamıyor. Manuel ayarlar ve mevcut varsayılanlar kullanılabilir."
+  },
+  "modelProfile.refresh": {
+    "defaultMessage": "Provider ayarlarını yenile"
+  },
+  "modelProfile.low": {
+    "defaultMessage": "Düşük"
+  },
+  "modelProfile.manual": {
+    "defaultMessage": "model profili"
+  },
+  "modelProfile.medium": {
+    "defaultMessage": "Orta"
+  },
+  "modelProfile.minP": {
+    "defaultMessage": "Min-p"
+  },
+  "modelProfile.none": {
+    "defaultMessage": "Yapılandırılmadı / desteklenmiyor"
+  },
+  "modelProfile.off": {
+    "defaultMessage": "Kapalı"
+  },
+  "modelProfile.on": {
+    "defaultMessage": "Açık"
+  },
+  "modelProfile.output": {
+    "defaultMessage": "Azami çıktı (token)"
+  },
+  "modelProfile.presence": {
+    "defaultMessage": "Tekrar cezası (presence penalty)"
+  },
+  "modelProfile.preserve": {
+    "defaultMessage": "Dönen thinking içeriğini sohbet bağlamında koru"
+  },
+  "modelProfile.preserveHelp": {
+    "defaultMessage": "Sunucunun döndürdüğü reasoning içeriğini yeniden gönderir; sunucu desteği gerekir. Thinking özelliğini açmaz."
+  },
+  "modelProfile.protocol": {
+    "defaultMessage": "Bu model/sunucunun desteklediği thinking API"
+  },
+  "modelProfile.reset": {
+    "defaultMessage": "Profili sıfırla"
+  },
+  "modelProfile.save": {
+    "defaultMessage": "Profili kaydet"
+  },
+  "modelProfile.saveApply": {
+    "defaultMessage": "Kaydet ve bu sohbete uygula"
+  },
+  "modelProfile.scope": {
+    "defaultMessage": "Yalnız bu sağlayıcı ve tam model adı için kaydedilir. Boş alanlar mevcut varsayılanları kullanır. Sunucunun context veya VRAM ayırmasını değiştirmez."
+  },
+  "modelProfile.server": {
+    "defaultMessage": "sunucu bilgisi"
+  },
+  "modelProfile.settings": {
+    "defaultMessage": "Model ayarları"
+  },
+  "modelProfile.temperature": {
+    "defaultMessage": "Sıcaklık (temperature)"
+  },
+  "modelProfile.thinking": {
+    "defaultMessage": "Thinking"
+  },
+  "modelProfile.topK": {
+    "defaultMessage": "Top-k (sunucuya göre -1 veya 0 devre dışı bırakır)"
+  },
+  "modelProfile.topP": {
+    "defaultMessage": "Top-p"
+  },
+  "modelProfile.wait": {
+    "defaultMessage": "Ayarlar yanıtlar arasında uygulanır. Thinking seçicisi için sohbet başlatın."
+  },
+  "modelProfile.warning": {
+    "defaultMessage": "İstemci limiti sunucunun bildirdiği ayrılmış alanı ({limit}) aşıyor. İstemci limitini azaltın veya sunucuyu ayrıca yapılandırın."
+  },
+  "wikiSession.busy": {
+    "defaultMessage": "Giriş yapılıyor…"
+  },
+  "wikiSession.failure": {
+    "defaultMessage": "Wiki girişi başarısız. Kimlik bilgilerinizi ve kayıtlı, etkin bağlantı adresini kontrol edin. HTTPS veya yerel döngü IP adresi üzerinden HTTP gereklidir."
+  },
+  "wikiSession.handle": {
+    "defaultMessage": "Wiki kullanıcı adı"
+  },
+  "wikiSession.note": {
+    "defaultMessage": "Kayıtlı ve etkin Wiki adresine giriş yapın. Adres değişikliklerini önce kaydedin. Kimlik bilgileriniz sohbete gönderilmez."
+  },
+  "wikiSession.password": {
+    "defaultMessage": "Wiki parolası"
+  },
+  "wikiSession.renew": {
+    "defaultMessage": "Wiki oturumunu yenile"
+  },
+  "wikiSession.success": {
+    "defaultMessage": "Wiki yetkilendirmesi güncellendi. Bekleyen plan kaydını yeniden deneyin. Mevcut Wiki araç bağlantılarının yeniden bağlanması gerekebilir."
+  },
+  "wikiSession.title": {
+    "defaultMessage": "Wiki oturumu"
+  },
+  "modelProfile.session": {
+    "defaultMessage": "saved chat setting"
   }
 }

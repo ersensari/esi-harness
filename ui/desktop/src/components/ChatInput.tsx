@@ -7,6 +7,7 @@ import type { View } from '../utils/navigationUtils';
 import Stop from './ui/Stop';
 import { Attach, Close, Microphone } from './icons';
 import { ChatState } from '../types/chatState';
+import { readModelProfile } from '../acp/modelProfiles';
 import debounce from 'lodash/debounce';
 import { LocalMessageStorage } from '../utils/localMessageStorage';
 import { DirSwitcher } from './bottom_menu/DirSwitcher';
@@ -298,6 +299,11 @@ export default function ChatInput({
   );
   const effectiveModel = modelOverride?.model ?? sessionModel ?? configModel;
   const effectiveProvider = modelOverride?.provider ?? sessionProvider ?? configProvider;
+  const [initialThinking, setInitialThinking] = useState<UserInput['initialThinking']>();
+  const currentInitialThinking =
+    initialThinking?.provider === effectiveProvider && initialThinking?.model === effectiveModel
+      ? initialThinking
+      : undefined;
 
   // Clear override when the underlying data catches up (session props for
   // active chats, config defaults for Hub / no-session contexts).
@@ -598,6 +604,13 @@ export default function ChatInput({
         return;
       }
 
+      if (provider.startsWith('custom_')) {
+        const resolved = await readModelProfile(provider, model, sessionId);
+        setTokenLimit(resolved.contextLimit);
+        setIsTokenLimitLoaded(true);
+        return;
+      }
+
       // Priority 1: Check predefined models from environment
       const predefinedModels = getPredefinedModelsFromEnv();
       const predefinedModel = predefinedModels.find((m) => m.name === model);
@@ -642,7 +655,12 @@ export default function ChatInput({
   useEffect(() => {
     loadProviderDetails();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveModel, effectiveProvider, configModel, configProvider]);
+  }, [effectiveModel, effectiveProvider, configModel, configProvider, sessionId]);
+
+  const handleProfileContextResolved = useCallback((limit: number) => {
+    setTokenLimit(limit);
+    setIsTokenLimitLoaded(true);
+  }, []);
 
   // Handle token usage alerts
   useEffect(() => {
@@ -1108,7 +1126,13 @@ export default function ChatInput({
           }
         }
 
-        handleSubmit({ msg: textToSend, images: imageData });
+        handleSubmit({
+          msg: textToSend,
+          images: imageData,
+          ...(!sessionId && currentInitialThinking
+            ? { initialThinking: currentInitialThinking }
+            : {}),
+        });
 
         // Auto-resume queue after sending a NON-interruption message (if it was paused due to interruption)
         if (
@@ -1139,6 +1163,7 @@ export default function ChatInput({
       lastInterruption,
       clearInputState,
       sessionId,
+      currentInitialThinking,
     ]
   );
 
@@ -1670,6 +1695,16 @@ export default function ChatInput({
               latestInference={latestInference}
               onModelChanged={setModelOverride}
               sessionLoaded={sessionLoaded}
+              busy={isLoading}
+              initialThinking={currentInitialThinking?.effort}
+              onContextResolved={handleProfileContextResolved}
+              onInitialThinkingChange={(effort) =>
+                setInitialThinking(
+                  effort && effectiveProvider && effectiveModel
+                    ? { provider: effectiveProvider, model: effectiveModel, effort }
+                    : undefined
+                )
+              }
             />
           </div>
         </Tooltip>

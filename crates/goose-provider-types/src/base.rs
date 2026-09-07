@@ -514,6 +514,18 @@ pub trait Provider: Send + Sync {
     /// Providers may override this to enrich the limit with provider-specific
     /// metadata (e.g. cached model info or a value captured from a remote
     /// session). The default returns the limit derived from the model config.
+    /// Actual server-advertised allocation, distinct from catalog and client limits.
+    async fn advertised_context_limit(&self, _model_name: &str) -> Option<usize> {
+        None
+    }
+
+    async fn advertised_model_profile(
+        &self,
+        _model_name: &str,
+    ) -> Option<crate::model_profile::ModelProfile> {
+        None
+    }
+
     async fn get_context_limit(&self, model_config: &ModelConfig) -> Result<usize, ProviderError> {
         Ok(model_config.context_limit())
     }

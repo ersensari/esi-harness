@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
 
-pub(crate) const SCHEMA_VERSION: u32 = 1;
+pub(crate) const SCHEMA_VERSION: u32 = 2;
 
 /// Relative path from the workspace root to the plan file.
 pub const PLAN_RELATIVE_PATH: &str = ".esi/workspace-plan.json";
@@ -189,6 +189,10 @@ pub struct PlanEvent {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkspacePlan {
     pub(crate) schema_version: u32,
+    #[serde(default)]
+    pub(crate) storage_revision: u64,
+    #[serde(skip)]
+    pub(crate) persisted_snapshot: Option<crate::storage::Snapshot>,
     pub(crate) workspace_id: String,
     pub(crate) canonical_path: PathBuf,
     pub(crate) status: WorkspacePlanStatus,
@@ -216,6 +220,8 @@ pub struct WorkspacePlan {
 
 #[derive(Debug, Error)]
 pub enum WorkspacePlanError {
+    #[error(transparent)]
+    Persistence(#[from] crate::storage::PersistenceError),
     #[error("invalid plan transition from {from:?} to {to:?}")]
     InvalidTransition {
         from: WorkspacePlanStatus,

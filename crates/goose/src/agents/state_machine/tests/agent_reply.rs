@@ -24,6 +24,12 @@ use crate::session::{SessionManager, SessionType};
 use goose_providers::model::ModelConfig;
 
 async fn agent_with_dummy_api() -> Result<(Agent, Arc<DummyApi>, String, tempfile::TempDir)> {
+    agent_with_dummy_api_platform(GoosePlatform::GooseCli).await
+}
+
+async fn agent_with_dummy_api_platform(
+    platform: GoosePlatform,
+) -> Result<(Agent, Arc<DummyApi>, String, tempfile::TempDir)> {
     let api = Arc::new(DummyApi::start(ProviderFeatures::default()).await);
     let api_client = goose_providers::api_client::ApiClient::new_with_tls(
         api.uri(),
@@ -52,7 +58,7 @@ async fn agent_with_dummy_api() -> Result<(Agent, Arc<DummyApi>, String, tempfil
         None,
         GooseMode::Auto,
         true,
-        GoosePlatform::GooseCli,
+        platform,
     ));
     agent
         .update_provider(
@@ -64,6 +70,146 @@ async fn agent_with_dummy_api() -> Result<(Agent, Arc<DummyApi>, String, tempfil
         .await?;
 
     Ok((agent, api, session.id, temp_dir))
+}
+
+struct UnavailableAuthorityGate;
+
+#[async_trait::async_trait]
+impl crate::tool_inspection::ToolInspector for UnavailableAuthorityGate {
+    fn name(&self) -> &'static str {
+        "workspace_plan"
+    }
+    fn is_required(&self) -> bool {
+        true
+    }
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+    async fn inspect(
+        &self,
+        _session_id: &str,
+        _requests: &[crate::conversation::message::ToolRequest],
+        _messages: &[Message],
+        _mode: GooseMode,
+    ) -> Result<Vec<crate::tool_inspection::InspectionResult>> {
+        anyhow::bail!("injected authority failure")
+    }
+}
+
+#[tokio::test]
+async fn authority_required_gate_failure_prevents_execution_in_both_agent_loops() -> Result<()> {
+    use super::calculator_extension::{value, CalculatorExtension, ADD};
+    use crate::agents::mcp_client::McpClientTrait;
+    use crate::agents::ExtensionConfig;
+    for state_machine in ["0", "1"] {
+        let _guard = env_lock::lock_env([("GOOSE_STATE_MACHINE", Some(state_machine))]);
+        let (mut agent, api, session_id, _temp_dir) = agent_with_dummy_api().await?;
+        let calculator = Arc::new(CalculatorExtension::new(
+            agent.config.session_manager.action_required(),
+        ));
+        agent
+            .extension_manager
+            .add_client(
+                "calculator".into(),
+                ExtensionConfig::Platform {
+                    name: "calculator".into(),
+                    description: "Gate fixture".into(),
+                    display_name: None,
+                    bundled: None,
+                    available_tools: vec![],
+                },
+                calculator.clone(),
+                calculator.get_info().cloned(),
+                None,
+            )
+            .await;
+        agent
+            .tool_inspection_manager
+            .add_inspector(Box::new(UnavailableAuthorityGate));
+        api.on("try gated mutation").call(ADD, value(7));
+        api.on("Required tool authority gate")
+            .reply("authority failed safely");
+        let messages = tokio::time::timeout(
+            Duration::from_secs(30),
+            reply_messages(
+                &agent,
+                session_id,
+                Message::user().with_text("try gated mutation"),
+            ),
+        )
+        .await??;
+        assert_eq!(
+            calculator.total(),
+            0,
+            "loop {state_machine} must not execute"
+        );
+        assert!(
+            calculator.contexts().is_empty(),
+            "tool must never be dispatched"
+        );
+        let streamed_text: String = messages.iter().map(Message::as_concat_text).collect();
+        assert!(
+            streamed_text.contains("authority failed safely"),
+            "loop {state_machine} should return the actual denial to the model: {streamed_text}"
+        );
+        assert_eq!(api.call_count(), 2);
+        assert!(api.calls()[1].input_contains("Required tool authority gate"));
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn authority_untrusted_registration_cannot_execute_in_both_agent_loops() -> Result<()> {
+    use super::calculator_extension::{value, CalculatorExtension, ADD};
+    use crate::agents::mcp_client::McpClientTrait;
+    use crate::agents::ExtensionConfig;
+    for state_machine in ["0", "1"] {
+        let _guard = env_lock::lock_env([("GOOSE_STATE_MACHINE", Some(state_machine))]);
+        crate::config::Config::global().set_param("ESI_AUTHORITY_TEST_INITIALIZED", true)?;
+        let (agent, api, session_id, _temp_dir) =
+            agent_with_dummy_api_platform(GoosePlatform::GooseDesktop).await?;
+        let calculator = Arc::new(CalculatorExtension::new(
+            agent.config.session_manager.action_required(),
+        ));
+        agent
+            .extension_manager
+            .add_client(
+                "calculator".into(),
+                ExtensionConfig::Platform {
+                    name: "calculator".into(),
+                    description: "Unknown capability with harmless name".into(),
+                    display_name: None,
+                    bundled: None,
+                    available_tools: vec![],
+                },
+                calculator.clone(),
+                calculator.get_info().cloned(),
+                None,
+            )
+            .await;
+        api.on("try unknown capability").call(ADD, value(7));
+        api.on("Untrusted tool registration")
+            .reply("untrusted dispatch denied");
+        let messages = tokio::time::timeout(
+            Duration::from_secs(30),
+            reply_messages(
+                &agent,
+                session_id,
+                Message::user().with_text("try unknown capability"),
+            ),
+        )
+        .await??;
+        assert_eq!(calculator.total(), 0, "loop {state_machine}");
+        assert!(calculator.contexts().is_empty());
+        let text: String = messages.iter().map(Message::as_concat_text).collect();
+        assert!(
+            text.contains("untrusted dispatch denied"),
+            "loop {state_machine}: {text}"
+        );
+        assert_eq!(api.call_count(), 2);
+        assert!(api.calls()[1].input_contains("Untrusted tool registration"));
+    }
+    Ok(())
 }
 
 #[tokio::test]

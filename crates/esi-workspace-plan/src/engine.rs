@@ -1,6 +1,5 @@
 use crate::model::*;
 use sha2::{Digest, Sha256};
-use std::fs;
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -137,6 +136,8 @@ impl WorkspacePlan {
         let now = now_rfc3339();
         let mut plan = Self {
             schema_version: SCHEMA_VERSION,
+            storage_revision: 0,
+            persisted_snapshot: None,
             workspace_id,
             canonical_path: canonical,
             status: WorkspacePlanStatus::Discovery,
@@ -201,6 +202,10 @@ impl WorkspacePlan {
 
     pub fn revision_count(&self) -> u32 {
         self.revision_count
+    }
+
+    pub fn storage_revision(&self) -> u64 {
+        self.storage_revision
     }
 
     pub fn events(&self) -> &[PlanEvent] {
@@ -432,26 +437,38 @@ impl WorkspacePlan {
     /// no plan file exists.
     pub fn load(workspace: impl AsRef<Path>) -> Result<Option<Self>, WorkspacePlanError> {
         let path = Self::plan_path(workspace);
-        if !path.is_file() {
+        let Some((data, snapshot)) = crate::storage::read(&path)? else {
             return Ok(None);
+        };
+        let mut plan: Self = serde_json::from_slice(&data)?;
+        if plan.schema_version == 1 {
+            plan.schema_version = SCHEMA_VERSION;
         }
-        let data = fs::read(&path)?;
-        let plan: Self = serde_json::from_slice(&data)?;
         if plan.schema_version != SCHEMA_VERSION {
             return Err(WorkspacePlanError::InvalidPersistedPlan);
         }
+        plan.persisted_snapshot = Some(snapshot);
         Ok(Some(plan))
     }
 
     /// Save the workspace plan to its canonical location.
-    pub fn save(&self, workspace: impl AsRef<Path>) -> Result<(), WorkspacePlanError> {
+    pub fn save(&mut self, workspace: impl AsRef<Path>) -> Result<(), WorkspacePlanError> {
         let path = Self::plan_path(workspace);
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+        if self.schema_version != SCHEMA_VERSION {
+            return Err(WorkspacePlanError::InvalidPersistedPlan);
         }
-        let temporary = path.with_extension("json.tmp");
-        fs::write(&temporary, serde_json::to_vec_pretty(self)?)?;
-        fs::rename(temporary, path)?;
+        let mut next = self.clone();
+        next.storage_revision = self
+            .storage_revision
+            .checked_add(1)
+            .ok_or(crate::storage::PersistenceError::RevisionExhausted)?;
+        let bytes = serde_json::to_vec_pretty(&next)?;
+        next.persisted_snapshot = Some(crate::storage::commit(
+            &path,
+            self.persisted_snapshot.as_ref(),
+            &bytes,
+        )?);
+        *self = next;
         Ok(())
     }
 

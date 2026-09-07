@@ -3,6 +3,8 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'node:path';
 
+require('../../scripts/test-environment.cjs').assertIsolatedTestEnvironment();
+
 const cfg = {
   plugins: [react()],
   resolve: {

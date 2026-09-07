@@ -8,7 +8,6 @@
 import { test, type TestContext } from 'vitest';
 import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 // ---------------------------------------------------------------------------
@@ -142,14 +141,14 @@ function getProviders(): ProviderConfig[] {
       models: ['gpt-4.1'],
       available: () =>
         hasEnv('GITHUB_COPILOT_TOKEN') ||
-        hasFile(path.join(os.homedir(), '.config/goose/github_copilot_token.json')),
+        hasFile(path.join(process.env.GOOSE_PATH_ROOT!, 'config/github_copilot_token.json')),
     },
     {
       provider: 'chatgpt_codex',
       models: ['gpt-5.4'],
       available: () =>
         hasEnv('CHATGPT_CODEX_TOKEN') ||
-        hasFile(path.join(os.homedir(), '.config/goose/chatgpt_codex/tokens.json')),
+        hasFile(path.join(process.env.GOOSE_PATH_ROOT!, 'config/chatgpt_codex/tokens.json')),
     },
     {
       provider: 'claude-code',
@@ -197,6 +196,7 @@ function loadDotenv(): void {
     const eqIdx = trimmed.indexOf('=');
     if (eqIdx === -1) continue;
     const key = trimmed.slice(0, eqIdx);
+    if (key === 'PLUGINS') continue; // Never reintroduce ambient plugin discovery.
     const value = stripQuotes(trimmed.slice(eqIdx + 1));
     if (!(key in process.env)) {
       process.env[key] = value;
@@ -243,14 +243,15 @@ export interface TestCase {
 }
 
 export function discoverTestCases(options?: { skipAgentic?: boolean }): TestCase[] {
-  loadDotenv();
+  const live = process.env.ESI_TEST_LIVE_PROVIDERS === '1';
+  if (live) loadDotenv();
   const skipAgentic = options?.skipAgentic ?? false;
   const providers = getProviders();
 
   const testCases: TestCase[] = [];
 
   for (const pc of providers) {
-    const providerAvailable = pc.available();
+    const providerAvailable = live && pc.available();
     const agentic = pc.agentic ?? false;
 
     for (const entry of pc.models) {
@@ -264,7 +265,7 @@ export function discoverTestCases(options?: { skipAgentic?: boolean }): TestCase
           available: false,
           flaky,
           agentic,
-          skippedReason: 'prerequisites not met',
+          skippedReason: live ? 'prerequisites not met' : 'explicit ESI_TEST_LIVE_PROVIDERS=1 required',
         });
       } else if (shouldSkipProvider(pc.provider)) {
         testCases.push({

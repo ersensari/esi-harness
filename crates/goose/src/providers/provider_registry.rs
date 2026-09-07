@@ -24,6 +24,7 @@ pub type ProviderCleanup = Arc<dyn Fn() -> BoxFuture<'static, Result<()>> + Send
 
 #[derive(Clone)]
 pub struct ProviderEntry {
+    studio_execution_allowed: bool,
     metadata: ProviderMetadata,
     pub(crate) constructor: ProviderConstructor,
     pub(crate) inventory_identity: super::inventory::InventoryIdentityResolver,
@@ -35,6 +36,11 @@ pub struct ProviderEntry {
 }
 
 impl ProviderEntry {
+    pub(crate) fn require_studio_execution(&self) -> Result<()> {
+        anyhow::ensure!(self.studio_execution_allowed,
+            "ESI authority: native execution for this provider has no contained policy. Official Codex/Claude delegation remains trusted.");
+        Ok(())
+    }
     pub fn metadata(&self) -> &ProviderMetadata {
         &self.metadata
     }
@@ -63,7 +69,13 @@ impl ProviderEntry {
     pub fn normalize_model_config(&self, mut model: ModelConfig) -> Result<ModelConfig> {
         model = crate::model_config::materialize_model_config(&self.metadata.name, model)?;
 
-        if model.context_limit.is_none() {
+        if model.context_limit.is_none()
+            && model
+                .request_param::<crate::model_profiles::ModelProfile>(
+                    goose_providers::model_profile::PROFILE_PARAM,
+                )
+                .is_none()
+        {
             if let Some(info) = self
                 .metadata
                 .known_models
@@ -133,12 +145,26 @@ impl ProviderRegistry {
     {
         let metadata = F::metadata();
         let name = metadata.name.clone();
+        let factory = std::any::TypeId::of::<F>();
+        let trusted_delegate = [
+            std::any::TypeId::of::<super::claude_acp::ClaudeAcpProvider>(),
+            std::any::TypeId::of::<super::claude_code::ClaudeCodeProvider>(),
+            std::any::TypeId::of::<super::codex_acp::CodexAcpProvider>(),
+            std::any::TypeId::of::<super::codex::CodexProvider>(),
+            std::any::TypeId::of::<super::chatgpt_codex::ChatGptCodexProvider>(),
+        ]
+        .contains(&factory);
+        let studio_execution_allowed = trusted_delegate
+            || !metadata.setup.as_ref().is_some_and(|setup| {
+                setup.category == goose_providers::canonical::catalog::ProviderSetupCategory::Agent
+            });
 
         let inventory = InventoryResolvers::for_metadata(&metadata, inventory_registration);
 
         self.entries.insert(
             name,
             ProviderEntry {
+                studio_execution_allowed,
                 metadata,
                 constructor: Arc::new(|extensions, working_dir, tls_config, use_default_model| {
                     Box::pin(async move {
@@ -315,6 +341,10 @@ impl ProviderRegistry {
         self.entries.insert(
             config.name.clone(),
             ProviderEntry {
+                studio_execution_allowed: !base_metadata.setup.as_ref().is_some_and(|setup| {
+                    setup.category
+                        == goose_providers::canonical::catalog::ProviderSetupCategory::Agent
+                }),
                 metadata: custom_metadata,
                 constructor: Arc::new(move |_extensions, _working_dir, tls_config, _| {
                     let result = constructor(tls_config);
@@ -377,6 +407,25 @@ mod tests {
     use super::*;
     use crate::config::declarative_providers::ProviderEngine;
     use crate::providers::openai_def::OpenAiProviderDef;
+
+    #[test]
+    fn authority_official_delegation_is_trusted_by_factory_not_name() {
+        let mut registry = ProviderRegistry::new(None);
+        registry.register::<super::super::claude_acp::ClaudeAcpProvider>(false);
+        registry.register::<super::super::claude_code::ClaudeCodeProvider>(false);
+        registry.register::<super::super::codex_acp::CodexAcpProvider>(false);
+        registry.register::<super::super::codex::CodexProvider>(false);
+        registry.register::<super::super::chatgpt_codex::ChatGptCodexProvider>(false);
+        registry.register::<OpenAiProviderDef>(false);
+        for entry in registry.entries.values() {
+            entry.require_studio_execution().unwrap();
+        }
+        registry.register::<super::super::amp_acp::AmpAcpProvider>(false);
+        let entry = registry.entries.get_mut("amp-acp").unwrap();
+        assert!(entry.require_studio_execution().is_err());
+        entry.metadata.name = "codex-acp".into();
+        assert!(entry.require_studio_execution().is_err());
+    }
 
     fn test_config() -> DeclarativeProviderConfig {
         DeclarativeProviderConfig {

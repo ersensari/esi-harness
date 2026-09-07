@@ -5,6 +5,102 @@ use crate::config::permission::PermissionLevel;
 use goose_sdk_types::custom_requests::{ToolListItem, ToolPermissionLevel};
 use rmcp::model::CallToolRequestParams;
 
+#[cfg(test)]
+mod authority_tests {
+    use super::*;
+    use crate::agents::{AgentConfig, GoosePlatform};
+
+    #[tokio::test]
+    async fn authority_acp_app_calls_cannot_approve_or_mutate_without_receipt() {
+        crate::config::Config::global()
+            .set_param("ESI_AUTHORITY_TEST_INITIALIZED", true)
+            .unwrap();
+        let data = tempfile::tempdir().unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        let server = GooseAcpAgent::new(GooseAcpAgentOptions {
+            provider_factory: Arc::new(|_, _, _, _| {
+                Box::pin(async { Err(anyhow::anyhow!("No live provider in authority fixture")) })
+            }),
+            builtin_selection: AcpBuiltinSelection::default(),
+            data_dir: data.path().into(),
+            config_dir: data.path().into(),
+            disable_session_naming: true,
+            goose_platform: GoosePlatform::GooseDesktop,
+            additional_source_roots: vec![],
+            scheduler: None,
+            session_cwd: None,
+            active_prompt_runs: Default::default(),
+        })
+        .await
+        .unwrap();
+        let session = server
+            .session_manager
+            .create_session(
+                workspace.path().into(),
+                "authority ACP".into(),
+                SessionType::Acp,
+                GooseMode::Auto,
+            )
+            .await
+            .unwrap();
+        let agent = Arc::new(Agent::with_config(AgentConfig::new(
+            server.session_manager.clone(),
+            server.permission_manager.clone(),
+            None,
+            GooseMode::Auto,
+            true,
+            GoosePlatform::GooseDesktop,
+        )));
+        for name in ["developer", "workspaceplan"] {
+            agent
+                .extension_manager
+                .add_extension(
+                    crate::agents::ExtensionConfig::Platform {
+                        name: name.into(),
+                        description: String::new(),
+                        display_name: None,
+                        bundled: None,
+                        available_tools: vec![],
+                    },
+                    Some(workspace.path().into()),
+                    None,
+                    Some(&session.id),
+                )
+                .await
+                .unwrap();
+        }
+        server.register_acp_session(session.id.clone(), agent).await;
+        let status = server
+            .on_call_tool(GooseToolCallRequest {
+                session_id: session.id.clone(),
+                name: "workspaceplan__status".into(),
+                arguments: serde_json::json!({}),
+            })
+            .await
+            .unwrap();
+        assert!(!status.is_error);
+        for (name, args) in [
+            ("shell", serde_json::json!({"command":"touch bypass"})),
+            (
+                "write",
+                serde_json::json!({"path":"bypass","content":"bad"}),
+            ),
+            ("workspaceplan__approve", serde_json::json!({})),
+        ] {
+            let result = server
+                .on_call_tool(GooseToolCallRequest {
+                    session_id: session.id.clone(),
+                    name: name.into(),
+                    arguments: args,
+                })
+                .await;
+            let error = result.unwrap_err();
+            assert!(error.data.unwrap().to_string().contains("ESI authority"));
+        }
+        assert!(!workspace.path().join("bypass").exists());
+    }
+}
+
 impl GooseAcpAgent {
     pub(super) async fn on_get_tools(
         &self,

@@ -109,6 +109,7 @@ mod load_session;
 mod local_inference;
 mod manage_sessions;
 mod message_meta;
+mod model_profiles;
 mod new_session;
 mod onboarding;
 mod prompts;
@@ -332,6 +333,7 @@ pub struct GooseAcpAgentOptions {
 }
 
 pub struct GooseAcpAgent {
+    managed_authority: bool,
     sessions: Arc<Mutex<HashMap<String, GooseAcpSession>>>,
     active_prompt_runs: Arc<Mutex<HashMap<String, ActivePromptRun>>>,
     closed_session_ids: Arc<Mutex<HashSet<String>>>,
@@ -931,6 +933,7 @@ impl GooseAcpAgent {
         let (thinking_effort_update_tx, thinking_effort_update_rx) = mpsc::unbounded_channel();
 
         Ok(Self {
+            managed_authority: matches!(options.goose_platform, GoosePlatform::GooseDesktop),
             sessions: Arc::new(Mutex::new(HashMap::new())),
             active_prompt_runs: options.active_prompt_runs,
             closed_session_ids: Arc::new(Mutex::new(HashSet::new())),
@@ -970,6 +973,11 @@ impl GooseAcpAgent {
         working_dir: Option<PathBuf>,
         use_default_model: bool,
     ) -> Result<Arc<dyn Provider>> {
+        if self.managed_authority {
+            crate::providers::get_from_registry(provider_name)
+                .await?
+                .require_studio_execution()?;
+        }
         (self.provider_factory)(
             provider_name.to_string(),
             extensions,
@@ -2499,7 +2507,10 @@ impl GooseAcpAgent {
             crate::model_config::model_config_from_user_config_with_session_settings(
                 &resolved_provider_name,
                 model,
-                Some(&current_model_config),
+                (!is_changing_provider
+                    || (!current_provider_name.starts_with("custom_")
+                        && !resolved_provider_name.starts_with("custom_")))
+                .then_some(&current_model_config),
                 request_params,
                 context_limit,
             )

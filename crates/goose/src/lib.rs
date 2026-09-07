@@ -28,6 +28,7 @@ pub mod instance_id;
 pub mod logging;
 pub mod mcp_utils;
 pub mod model_config;
+pub mod model_profiles;
 pub mod oauth;
 #[cfg(feature = "otel")]
 pub mod otel;
@@ -56,3 +57,4 @@ pub mod tool_monitor;
 pub mod tracing;
 pub mod utils;
 mod workspace_plan_gate;
+mod workspace_tool_authority;

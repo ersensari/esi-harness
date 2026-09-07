@@ -15,6 +15,7 @@ import ExtensionConfigFields from './ExtensionConfigFields';
 import { PlusIcon, Edit, Trash2, AlertTriangle, Info } from 'lucide-react';
 import ExtensionInfoFields from './ExtensionInfoFields';
 import ExtensionTimeoutField from './ExtensionTimeoutField';
+import WikiSessionForm from './WikiSessionForm';
 import { acpUpsertConfig } from '../../../../acp/config';
 import { ConfirmationModal } from '../../../ui/ConfirmationModal';
 import { defineMessages, useIntl } from '../../../../i18n';
@@ -478,6 +479,10 @@ export default function ExtensionModal({
                 </>
               )}
             </div>
+          )}
+
+          {!showDeleteConfirmation && modalType === 'edit' && initialData.name === 'esi-wiki' && (
+            <WikiSessionForm />
           )}
 
           <DialogFooter className="pt-2">

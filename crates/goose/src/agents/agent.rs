@@ -412,14 +412,17 @@ impl Agent {
             provider: provider.clone(),
             config,
             current_goose_mode: Mutex::new(initial_mode),
-            extension_manager: Arc::new(ExtensionManager::new(
-                provider.clone(),
-                session_manager,
-                scheduler,
-                client_name,
-                capabilities,
-                use_login_shell_path,
-            )),
+            extension_manager: Arc::new(
+                ExtensionManager::new(
+                    provider.clone(),
+                    session_manager,
+                    scheduler,
+                    client_name,
+                    capabilities,
+                    use_login_shell_path,
+                )
+                .with_managed_authority(enforce_workspace_plans, permission_manager.clone()),
+            ),
             final_output_tool: Arc::new(Mutex::new(None)),
             frontend_extensions: Mutex::new(HashMap::new()),
             frontend_tools: Mutex::new(HashMap::new()),
@@ -435,7 +438,7 @@ impl Agent {
                 inspection_session_manager,
                 enforce_workspace_plans,
             ),
-            hook_manager: if is_subagent {
+            hook_manager: if is_subagent || enforce_workspace_plans {
                 crate::hooks::HookManager::default()
             } else {
                 crate::hooks::HookManager::load(
@@ -1117,6 +1120,10 @@ impl Agent {
     }
 
     async fn insert_frontend_extension(&self, extension: ExtensionConfig) {
+        if self.extension_manager.has_managed_authority() {
+            tracing::warn!("ESI authority: frontend tools have no contained execution policy");
+            return;
+        }
         let mut extensions = self.frontend_extensions.lock().await;
         extensions.insert(extension.key(), extension);
         self.rebuild_frontend_derived_state(&extensions).await;
@@ -1549,6 +1556,11 @@ impl Agent {
 
         match &extension {
             ExtensionConfig::Frontend { .. } => {
+                if self.extension_manager.has_managed_authority() {
+                    return Err(crate::agents::extension::ExtensionError::ConfigError(
+                        "ESI authority: frontend tools have no contained execution policy".into(),
+                    ));
+                }
                 self.insert_frontend_extension(extension.clone()).await;
             }
             _ => {
@@ -3557,6 +3569,9 @@ impl Agent {
     ) -> Result<()> {
         let provider_name = provider.get_name().to_string();
 
+        let model_config =
+            crate::model_profiles::apply_advertised(provider.as_ref(), model_config).await?;
+
         // Normalize against the provider entry so custom/declarative providers
         // backfill `context_limit` from their known models before the config is
         // persisted as the session source of truth; otherwise auto-compaction
@@ -3616,6 +3631,19 @@ impl Agent {
         *self.current_goose_mode.lock().await
     }
 
+    async fn create_authorized_provider(
+        &self,
+        provider_name: &str,
+        extensions: Vec<ExtensionConfig>,
+        working_dir: std::path::PathBuf,
+    ) -> Result<Arc<dyn Provider>> {
+        let entry = crate::providers::get_from_registry(provider_name).await?;
+        if self.extension_manager.has_managed_authority() {
+            entry.require_studio_execution()?;
+        }
+        entry.create_with_working_dir(extensions, working_dir).await
+    }
+
     pub async fn recreate_provider_for_session(
         &self,
         session_id: &str,
@@ -3634,13 +3662,10 @@ impl Agent {
             Config::global(),
         );
 
-        let provider = crate::providers::create_with_working_dir(
-            provider_name,
-            extensions,
-            session.working_dir.clone(),
-        )
-        .await
-        .map_err(|error| provider_creation_error(error, "Could not create provider"))?;
+        let provider = self
+            .create_authorized_provider(provider_name, extensions, session.working_dir.clone())
+            .await
+            .map_err(|error| provider_creation_error(error, "Could not create provider"))?;
 
         self.update_provider(provider, model_config, session_id)
             .await?;
@@ -3688,6 +3713,13 @@ impl Agent {
             )))
         })?;
         let provider_name = current_provider.get_name().to_string();
+        if let Some(profile) = model_config.request_param::<crate::model_profiles::ModelProfile>(
+            goose_providers::model_profile::PROFILE_PARAM,
+        ) {
+            profile.validate_effort(effort).map_err(|error| {
+                anyhow::Error::new(ProviderError::InvalidValue(error.to_string()))
+            })?;
+        }
         self.recreate_provider_for_session(
             session_id,
             &provider_name,
@@ -3742,13 +3774,14 @@ impl Agent {
                 .await
                 .is_ok()
             {
-                let p = crate::providers::create_with_working_dir(
-                    &provider_name,
-                    extensions,
-                    session.working_dir.clone(),
-                )
-                .await
-                .map_err(|error| provider_creation_error(error, "Could not create provider"))?;
+                let p = self
+                    .create_authorized_provider(
+                        &provider_name,
+                        extensions,
+                        session.working_dir.clone(),
+                    )
+                    .await
+                    .map_err(|error| provider_creation_error(error, "Could not create provider"))?;
                 (p, model_config, false)
             } else {
                 let fallback_provider_name = config
@@ -3779,7 +3812,7 @@ impl Agent {
                     anyhow!("Could not configure fallback provider: invalid model {}", e)
                 })?;
 
-                let fallback_provider = crate::providers::create_with_working_dir(
+                let fallback_provider = self.create_authorized_provider(
                     &fallback_provider_name,
                     extensions,
                     session.working_dir.clone(),

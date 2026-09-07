@@ -567,6 +567,22 @@ impl<'a> ApiRequestBuilder<'a> {
         self.send_bounded(request).await
     }
 
+    /// Discovery must never forward custom credentials through redirects.
+    pub async fn metadata_get(self) -> Result<Response> {
+        let mut builder = ApiClient::configure_transport(
+            ApiClient::client_builder(self.client.timeout)
+                .default_headers(self.client.default_headers.clone()),
+            &self.client.transport_policy,
+        )
+        .redirect(Policy::none());
+        if let Some(tls) = &self.client.tls_config {
+            builder = ApiClient::configure_tls(builder, tls)?;
+        }
+        let client = builder.build()?;
+        let request = self.send_request(|url, _| client.get(url)).await?;
+        self.send_bounded(request).await
+    }
+
     async fn send_request<F>(&self, request_builder: F) -> Result<reqwest::RequestBuilder>
     where
         F: FnOnce(url::Url, &Client) -> reqwest::RequestBuilder,

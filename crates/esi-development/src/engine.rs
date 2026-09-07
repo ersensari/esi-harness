@@ -2,7 +2,6 @@ use crate::model::*;
 use esi_workspace::{LifecycleState, WorktreeInspection};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
-use std::fs;
 use std::path::Path;
 use std::process::Command;
 
@@ -67,6 +66,8 @@ impl DevelopmentState {
         }
         let mut state = Self {
             schema_version: SCHEMA_VERSION,
+            storage_revision: 0,
+            persisted_snapshot: None,
             run_id,
             stage: DevelopmentStage::Brief,
             brief: None,
@@ -89,6 +90,10 @@ impl DevelopmentState {
 
     pub fn run_id(&self) -> &str {
         &self.run_id
+    }
+
+    pub fn storage_revision(&self) -> u64 {
+        self.storage_revision
     }
 
     pub fn stage(&self) -> DevelopmentStage {
@@ -478,20 +483,27 @@ impl DevelopmentState {
         self.transition(DevelopmentStage::Abandoned)
     }
 
-    pub fn save(&self, path: impl AsRef<Path>) -> Result<(), DevelopmentError> {
+    pub fn save(&mut self, path: impl AsRef<Path>) -> Result<(), DevelopmentError> {
         self.validate_persisted_state()?;
-        let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
-        }
-        let temporary = path.with_extension("json.tmp");
-        fs::write(&temporary, serde_json::to_vec_pretty(self)?)?;
-        fs::rename(temporary, path)?;
+        let mut next = self.clone();
+        next.storage_revision = self
+            .storage_revision
+            .checked_add(1)
+            .ok_or(esi_workspace_plan::storage::PersistenceError::RevisionExhausted)?;
+        let bytes = serde_json::to_vec_pretty(&next)?;
+        next.persisted_snapshot = Some(esi_workspace_plan::storage::commit(
+            path.as_ref(),
+            self.persisted_snapshot.as_ref(),
+            &bytes,
+        )?);
+        *self = next;
         Ok(())
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, DevelopmentError> {
-        let mut state: Self = serde_json::from_slice(&fs::read(path)?)?;
+        let (bytes, snapshot) = esi_workspace_plan::storage::read(path.as_ref())?
+            .ok_or_else(|| std::io::Error::from(std::io::ErrorKind::NotFound))?;
+        let mut state: Self = serde_json::from_slice(&bytes)?;
         if state.schema_version == 1 {
             state.schema_version = SCHEMA_VERSION;
             if let Some(binding) = &state.worktree {
@@ -505,6 +517,10 @@ impl DevelopmentState {
                 state.emit(DevelopmentEventKind::WorktreeInspected { snapshot });
             }
         }
+        if state.schema_version == 2 {
+            state.schema_version = SCHEMA_VERSION;
+        }
+        state.persisted_snapshot = Some(snapshot);
         state.validate_persisted_state()?;
         Ok(state)
     }

@@ -18,6 +18,7 @@ import { View, ViewOptions } from '../utils/navigationUtils';
 import { useConfig } from './ConfigContext';
 import { getEffectiveWorkingDir, getInitialWorkingDir } from '../utils/workingDir';
 import { createSession } from '../sessions';
+import { applyInitialChatThinking } from '../acp/modelProfiles';
 import LoadingGoose from './LoadingGoose';
 import { UserInput } from '../types/message';
 import {
@@ -123,6 +124,7 @@ export default function Hub({
       // be pending when the user submits, and an explicit pick must win.
       const dir = userSelectedWorkingDirRef.current ? workingDir : await getEffectiveWorkingDir();
       const session = await createSession(dir, sessionOptions);
+      await applyInitialChatThinking(session, input);
       setNextChatExtensionDraft(null);
 
       window.dispatchEvent(new CustomEvent(AppEvents.SESSION_CREATED));

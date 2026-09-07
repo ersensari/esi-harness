@@ -13,6 +13,7 @@ import {
 import { Button } from '../../../ui/button';
 import { QUICKSTART_GUIDE_URL } from '../../providers/modal/constants';
 import { Input } from '../../../ui/input';
+import { ModelProfileControls } from '../ModelProfileControls';
 import { Select } from '../../../ui/Select';
 import {
   acpListProviderDetails,
@@ -313,7 +314,9 @@ export const SwitchModelModal = ({
   const [selectedModelReasoning, setSelectedModelReasoning] = useState<boolean | null>(null);
 
   const modelReasoning = selectedModelReasoning ?? selectedPredefinedModel?.reasoning;
-  const showThinkingControl = modelReasoning === true;
+  const showThinkingControl =
+    modelReasoning === true &&
+    !(selectedPredefinedModel?.provider ?? provider)?.startsWith('custom_');
   const resolveSelectedModelReasoning = useCallback(
     (providerName: string, modelName: string, fallback?: boolean) => {
       const requestId = ++reasoningRequestId.current;
@@ -974,6 +977,15 @@ export const SwitchModelModal = ({
             </div>
           )}
         </div>
+
+        {(selectedPredefinedModel?.provider ?? provider)?.startsWith('custom_') &&
+          (selectedPredefinedModel?.name ?? model) && (
+            <ModelProfileControls
+              key={`${selectedPredefinedModel?.provider ?? provider}/${selectedPredefinedModel?.name ?? model}`}
+              provider={(selectedPredefinedModel?.provider ?? provider)!}
+              model={selectedPredefinedModel?.name ?? model}
+            />
+          )}
 
         <DialogFooter className="pt-4 flex-col sm:flex-row gap-3">
           <a

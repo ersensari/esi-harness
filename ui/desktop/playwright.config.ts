@@ -1,5 +1,7 @@
 import { PlaywrightTestConfig } from '@playwright/test';
 
+require('../../scripts/test-environment.cjs').assertIsolatedTestEnvironment();
+
 const config: PlaywrightTestConfig = {
   testDir: './tests/e2e',
   timeout: 60000,

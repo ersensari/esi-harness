@@ -13,6 +13,8 @@ struct MockInspectorOk {
 
 struct MockInspectorErr {
     name: &'static str,
+    required: bool,
+    enabled: bool,
 }
 
 #[async_trait]
@@ -36,6 +38,12 @@ impl ToolInspector for MockInspectorOk {
 
 #[async_trait]
 impl ToolInspector for MockInspectorErr {
+    fn is_required(&self) -> bool {
+        self.required
+    }
+    fn is_enabled(&self) -> bool {
+        self.enabled
+    }
     fn name(&self) -> &'static str {
         self.name
     }
@@ -80,7 +88,11 @@ async fn test_inspect_tools_aggregates_and_handles_errors() {
         name: "ok",
         results: ok_results.clone(),
     }));
-    manager.add_inspector(Box::new(MockInspectorErr { name: "err" }));
+    manager.add_inspector(Box::new(MockInspectorErr {
+        name: "err",
+        required: false,
+        enabled: true,
+    }));
 
     // No specific input is required for this aggregation behavior
     let tool_requests: Vec<ToolRequest> = vec![];
@@ -118,4 +130,79 @@ async fn test_inspect_tools_aggregates_and_handles_errors() {
     assert!(results
         .iter()
         .any(|r| matches!(r.action, InspectionAction::RequireApproval(_))));
+}
+
+#[tokio::test]
+async fn required_gate_failure_denies_every_request_regardless_of_allow_order_or_mode() {
+    use goose::permission::permission_judge::PermissionCheckResult;
+    use goose::tool_inspection::apply_inspection_results_to_permissions;
+    use rmcp::model::CallToolRequestParams;
+    let requests: Vec<_> = ["one", "two"]
+        .into_iter()
+        .map(|id| ToolRequest {
+            id: id.into(),
+            tool_call: Ok(CallToolRequestParams::new("fixture__write")),
+            metadata: None,
+            tool_meta: None,
+        })
+        .collect();
+    for enabled in [true, false] {
+        for failure_first in [true, false] {
+            for mode in [GooseMode::Auto, GooseMode::Approve, GooseMode::SmartApprove] {
+                let mut manager = ToolInspectionManager::new();
+                let required: Box<dyn ToolInspector> = Box::new(MockInspectorErr {
+                    name: "trusted_fixture_gate",
+                    required: true,
+                    enabled,
+                });
+                let allow: Box<dyn ToolInspector> = Box::new(MockInspectorOk {
+                    name: "allow",
+                    results: requests
+                        .iter()
+                        .map(|r| InspectionResult {
+                            tool_request_id: r.id.clone(),
+                            action: InspectionAction::Allow,
+                            reason: "preapproved".into(),
+                            confidence: 1.0,
+                            inspector_name: "allow".into(),
+                            finding_id: None,
+                        })
+                        .collect(),
+                });
+                let inspectors = if failure_first {
+                    [required, allow]
+                } else {
+                    [allow, required]
+                };
+                for inspector in inspectors {
+                    manager.add_inspector(inspector);
+                }
+                let results = manager
+                    .inspect_tools("fixture", &requests, &[], mode)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    results
+                        .iter()
+                        .filter(|r| r.action == InspectionAction::Deny)
+                        .count(),
+                    2
+                );
+                assert!(results
+                    .iter()
+                    .all(|r| !r.reason.contains("simulated failure")));
+                let permissions = apply_inspection_results_to_permissions(
+                    PermissionCheckResult {
+                        approved: requests.clone(),
+                        needs_approval: vec![],
+                        denied: vec![],
+                    },
+                    &results,
+                );
+                assert!(permissions.approved.is_empty());
+                assert!(permissions.needs_approval.is_empty());
+                assert_eq!(permissions.denied.len(), 2);
+            }
+        }
+    }
 }

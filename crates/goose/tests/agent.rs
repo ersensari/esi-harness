@@ -5,6 +5,18 @@ use futures::StreamExt;
 use goose::agents::{Agent, AgentEvent, GoosePlatform};
 use goose::config::extensions::{set_extension, ExtensionEntry};
 
+// Bind before test threads can pin Config::global. This binary writes cutoff
+// and extension settings even when SessionManager itself uses a TempDir.
+#[ctor::ctor(unsafe)]
+fn isolate_agent_test_config() {
+    static ROOT: std::sync::LazyLock<tempfile::TempDir> =
+        std::sync::LazyLock::new(|| tempfile::tempdir().expect("agent test config"));
+    std::env::set_var("GOOSE_PATH_ROOT", ROOT.path());
+    std::env::set_var("GOOSE_DISABLE_KEYRING", "1");
+    std::env::set_var("GOOSE_ADDITIONAL_CONFIG_FILES", "");
+    std::env::remove_var("PLUGINS");
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

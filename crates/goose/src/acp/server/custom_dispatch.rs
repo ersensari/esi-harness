@@ -9,6 +9,35 @@ impl GooseAcpAgent {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, agent_client_protocol::Error> {
         let result = async {
+            if method.starts_with("_goose/esi/model-profile/") {
+                return self.on_model_profile(method, params).await;
+            }
+            if method == "_goose/esi/wiki/session/renew" {
+                // Configuration-only channel: never register as an agent tool.
+                // Do not derive Debug or include deserialization input in errors.
+                #[derive(serde::Deserialize)]
+                #[serde(deny_unknown_fields)]
+                struct WikiLogin {
+                    handle: String,
+                    password: String,
+                }
+                let login: WikiLogin = serde_json::from_value(params)
+                    .map_err(|_| agent_client_protocol::Error::invalid_params())?;
+                if login.handle.trim().is_empty()
+                    || login.handle.len() > 256
+                    || login.password.is_empty()
+                    || login.password.len() > 4096
+                {
+                    return Err(agent_client_protocol::Error::invalid_params());
+                }
+                self.config()?;
+                crate::esi_wiki_memory::renew_session(&login.handle, &login.password)
+                    .await
+                    .map_err(|error| {
+                        agent_client_protocol::Error::internal_error().data(error.to_string())
+                    })?;
+                return Ok(serde_json::json!({}));
+            }
             if <SaveRecipeRequest as agent_client_protocol::JsonRpcMessage>::matches_method(method)
             {
                 let req = recipe::deserialize_save_recipe_request(params)?;
