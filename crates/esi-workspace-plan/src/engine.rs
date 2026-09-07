@@ -23,6 +23,10 @@ pub fn is_plan_transition_allowed(from: WorkspacePlanStatus, to: WorkspacePlanSt
 // ---------------------------------------------------------------------------
 
 fn compute_content_hash(plan: &WorkspacePlan) -> String {
+    compute_snapshot_hash(&plan.content_snapshot())
+}
+
+pub(crate) fn compute_snapshot_hash(plan: &PlanContentSnapshot) -> String {
     if !plan.task_contracts.is_empty() {
         let mut content = serde_json::json!({
             "title": plan.title, "description": plan.description,
@@ -170,6 +174,7 @@ impl WorkspacePlan {
             created_at: now.clone(),
             updated_at: now,
             approval: None,
+            approval_history: Vec::new(),
             revision_count: 0,
             events: Vec::new(),
             memory_sync: None,
@@ -300,6 +305,10 @@ impl WorkspacePlan {
                 .approval
                 .as_ref()
                 .is_some_and(|a| a.content_hash == self.content_hash())
+            && self
+                .approval_history
+                .last()
+                .is_some_and(|revision| revision.content.as_ref() == Some(&self.content_snapshot()))
     }
 
     /// Returns `Ok(())` if implementation is allowed, or a typed error
@@ -321,7 +330,14 @@ impl WorkspacePlan {
             Some(approval) if approval.content_hash != self.content_hash() => {
                 Err(WorkspacePlanError::ContentHashMismatch)
             }
-            Some(_) => Ok(()),
+            Some(_)
+                if self.approval_history.last().is_some_and(|revision| {
+                    revision.content.as_ref() == Some(&self.content_snapshot())
+                }) =>
+            {
+                Ok(())
+            }
+            Some(_) => Err(WorkspacePlanError::ContentHashMismatch),
         }
     }
 
@@ -478,6 +494,10 @@ impl WorkspacePlan {
             approved_at: now,
             content_hash: hash,
         });
+        self.approval_history.push(ApprovedPlanRevision {
+            approval: self.approval.clone().expect("just recorded approval"),
+            content: Some(self.content_snapshot()),
+        });
         self.emit(PlanEventKind::Approved { approved_by });
         self.transition(WorkspacePlanStatus::Approved)
     }
@@ -521,16 +541,32 @@ impl WorkspacePlan {
             return Ok(None);
         };
         let mut plan: Self = serde_json::from_slice(&data)?;
-        if matches!(plan.schema_version, 1 | 2) {
-            if !plan.task_contracts.is_empty() {
-                return Err(WorkspacePlanError::InvalidPersistedPlan);
-            }
+        let legacy = matches!(plan.schema_version, 1..=3);
+        if legacy && !plan.approval_history.is_empty() {
+            return Err(WorkspacePlanError::InvalidPersistedPlan);
+        }
+        if matches!(plan.schema_version, 1 | 2) && !plan.task_contracts.is_empty() {
+            return Err(WorkspacePlanError::InvalidPersistedPlan);
+        }
+        if legacy {
             plan.schema_version = SCHEMA_VERSION;
         }
         if plan.schema_version != SCHEMA_VERSION {
             return Err(WorkspacePlanError::InvalidPersistedPlan);
         }
         plan.task_execution_order()?;
+        if legacy {
+            if let Some(approval) = &plan.approval {
+                let content = (plan.status == WorkspacePlanStatus::Approved
+                    && approval.content_hash == plan.content_hash())
+                .then(|| plan.content_snapshot());
+                plan.approval_history.push(ApprovedPlanRevision {
+                    approval: approval.clone(),
+                    content,
+                });
+            }
+        }
+        plan.validate_approval_history()?;
         plan.persisted_snapshot = Some(snapshot);
         Ok(Some(plan))
     }
@@ -542,6 +578,7 @@ impl WorkspacePlan {
             return Err(WorkspacePlanError::InvalidPersistedPlan);
         }
         self.task_execution_order()?;
+        self.validate_approval_history()?;
         let mut next = self.clone();
         next.storage_revision = self
             .storage_revision
@@ -576,7 +613,14 @@ impl WorkspacePlan {
     fn invalidate_if_approved(&mut self, reason: &str) -> Result<(), WorkspacePlanError> {
         if self.status == WorkspacePlanStatus::Approved {
             if let Some(approval) = &self.approval {
-                if approval.content_hash != self.content_hash() {
+                if approval.content_hash != self.content_hash()
+                    || self.approval_history.last().is_some_and(|revision| {
+                        revision
+                            .content
+                            .as_ref()
+                            .is_some_and(|content| content != &self.content_snapshot())
+                    })
+                {
                     self.revision_count += 1;
                     self.emit(PlanEventKind::ApprovalInvalidated {
                         reason: reason.to_string(),

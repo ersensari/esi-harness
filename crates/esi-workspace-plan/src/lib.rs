@@ -1,5 +1,6 @@
 mod engine;
 mod model;
+mod revision;
 pub mod storage;
 mod task_contract;
 mod templates;

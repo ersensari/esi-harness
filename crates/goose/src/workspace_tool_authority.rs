@@ -146,7 +146,7 @@ pub(crate) async fn check_permission(
         .goose_mode;
     let read_only = matches!(
         (extension, tool),
-        ("developer", "tree") | ("workspaceplan", "status")
+        ("developer", "tree") | ("workspaceplan", "status" | "revision_diff")
     );
     ensure!(
         mode != GooseMode::Chat || read_only,
@@ -212,6 +212,7 @@ pub(crate) async fn execute(
             "workspace": root, "title": plan.title(), "description": plan.description(),
             "requirements": plan.requirements(), "architecture": plan.architecture_notes(),
             "tasks": plan.tasks(), "innovation": plan.innovation_discovery(),
+            "task_contracts": plan.task_contracts(), "revision_diff": plan.revision_diff(),
             "revision": plan.storage_revision(), "hash": plan.content_hash()
         }))?;
         let human_bridge = sessions.action_required();
@@ -252,7 +253,7 @@ pub(crate) async fn execute(
     match factory {
         Factory::WorkspacePlan => {
             match tool {
-                "status" => {}
+                "status" | "revision_diff" => {}
                 "save_draft" => {
                     let identity = WorkspacePlan::new(&root, "identity")?;
                     Config::global().set_param(&receipt_key(&identity), Value::Null)?;

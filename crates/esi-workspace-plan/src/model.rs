@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
 
-pub(crate) const SCHEMA_VERSION: u32 = 3;
+pub(crate) const SCHEMA_VERSION: u32 = 4;
 
 /// Relative path from the workspace root to the plan file.
 pub const PLAN_RELATIVE_PATH: &str = ".esi/workspace-plan.json";
@@ -152,6 +152,54 @@ pub struct PlanApproval {
     pub content_hash: String,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanTaskContent {
+    pub id: String,
+    pub title: String,
+    pub description: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanContentSnapshot {
+    pub title: String,
+    pub description: String,
+    pub architecture_notes: String,
+    pub requirements: Vec<Requirement>,
+    pub tasks: Vec<PlanTaskContent>,
+    pub task_contracts: std::collections::BTreeMap<String, TaskContract>,
+    pub innovation_discovery: Option<InnovationDiscovery>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApprovedPlanRevision {
+    pub approval: PlanApproval,
+    pub content: Option<PlanContentSnapshot>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RevisionBaseline {
+    Available,
+    NoApproval,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanChange {
+    pub path: String,
+    pub before: Option<serde_json::Value>,
+    pub after: Option<serde_json::Value>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PlanRevisionDiff {
+    pub baseline: RevisionBaseline,
+    pub approved_hash: Option<String>,
+    pub current_hash: String,
+    pub changes: Vec<PlanChange>,
+    pub affected_task_ids: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Wiki bounded-memory capture outbox (TASK-POST-122)
 // ---------------------------------------------------------------------------
@@ -244,6 +292,8 @@ pub struct WorkspacePlan {
     pub(crate) created_at: String,
     pub(crate) updated_at: String,
     pub(crate) approval: Option<PlanApproval>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) approval_history: Vec<ApprovedPlanRevision>,
     pub(crate) revision_count: u32,
     pub(crate) events: Vec<PlanEvent>,
     /// Outbox state for bounded Wiki memory capture (TASK-POST-122).

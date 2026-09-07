@@ -45,6 +45,10 @@ for controller-managed work; keep ordinary trusted-tool work clearly distinct.
   `validation_expectations` (`id`, `description`, `criterion_ids`). Expectations
   describe future checks; they are not successful validation evidence. Status
   returns contracts and deterministic `task_execution_order` for reuse across chats.
+- Use `workspaceplan__revision_diff` before presenting a changed plan: explain
+  changed scope and affected downstream tasks. An `unavailable` legacy baseline
+  means old content cannot be reconstructed, not that nothing changed. Keep
+  approval history; unchanged task status is not validation evidence.
 - The user must explicitly approve the plan. You cannot approve it yourself.
 - Only after the user accepts the displayed plan, call `workspaceplan__approve`.
   Desktop always presents a confirmation for this tool, even in automatic mode.

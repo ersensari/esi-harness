@@ -185,6 +185,7 @@ fn task_contract_schema_two_migration_preserves_approval_without_writing() {
     let hash = plan.content_hash();
     let mut legacy = serde_json::to_value(&plan).unwrap();
     legacy["schema_version"] = 2.into();
+    legacy.as_object_mut().unwrap().remove("approval_history");
     let bytes = serde_json::to_vec(&legacy).unwrap();
     let path = WorkspacePlan::plan_path(root.path());
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();

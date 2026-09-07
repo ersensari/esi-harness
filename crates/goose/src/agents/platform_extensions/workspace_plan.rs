@@ -103,7 +103,8 @@ impl WorkspacePlanClient {
                 "Use status first. For an unplanned workspace, discuss requirements and \
                  Innovation options appropriate to scope. Use create_template for small_change \
                  or greenfield only when no authored plan exists; use save_draft to refine it. \
-                 Existing plans must be reused. Trusted native tools follow operator policy. Call approve only after the \
+                 Existing plans must be reused. Read revision_diff before presenting a changed plan. \
+                 Trusted native tools follow operator policy. Call approve only after the \
                  user explicitly accepts the displayed plan; Desktop will ask the user to confirm.",
             );
         Ok(Self { info })
@@ -162,6 +163,9 @@ impl WorkspacePlanClient {
                     "innovation": plan.innovation_discovery(),
                     "approval": plan.approval(),
                     "revision_count": plan.revision_count(),
+                    "storage_revision": plan.storage_revision(),
+                    "revision_diff": plan.revision_diff(),
+                    "approved_revision_count": plan.approval_history().len(),
                     "memory_sync": plan.memory_sync(),
                 });
                 CallToolResult::success(vec![Self::visible_text(
@@ -194,7 +198,7 @@ impl WorkspacePlanClient {
             },
             Err(error) => return Self::error(format!("Could not read workspace plan: {error}")),
         };
-        let original_hash = plan.content_hash();
+        let original_content = plan.content_snapshot();
         let contracts = params
             .task_contracts
             .unwrap_or_else(|| plan.task_contracts().clone());
@@ -247,12 +251,14 @@ impl WorkspacePlanClient {
         {
             return Self::error(error.to_string());
         }
-        if plan.content_hash() != original_hash {
-            // Old completion labels are not evidence for revised scope. Until the
-            // revision-diff phase identifies affected tasks, conservatively reset progress.
+        if plan.content_snapshot() != original_content {
+            let affected: std::collections::BTreeSet<_> =
+                plan.revision_diff().affected_task_ids.into_iter().collect();
             let mut tasks = plan.tasks().to_vec();
             for task in &mut tasks {
-                task.status = PlannedTaskStatus::Pending;
+                if affected.contains(&task.id) {
+                    task.status = PlannedTaskStatus::Pending;
+                }
             }
             if let Err(error) = plan.set_plan_content(
                 plan.description().to_string(),
@@ -295,6 +301,21 @@ impl WorkspacePlanClient {
             Err(error) => return Self::error(error.to_string()),
         }
         Self::status(context)
+    }
+
+    fn revision_diff(context: &ToolCallContext) -> CallToolResult {
+        let workspace = match Self::workspace(context) {
+            Ok(value) => value,
+            Err(error) => return Self::error(error),
+        };
+        match WorkspacePlan::load(workspace) {
+            Ok(Some(plan)) => CallToolResult::success(vec![Self::visible_text(serde_json::json!({
+                "diff": plan.revision_diff(), "storage_revision": plan.storage_revision(),
+                "approval_history": plan.approval_history().iter().map(|revision| &revision.approval).collect::<Vec<_>>(),
+            }).to_string())]),
+            Ok(None) => Self::error("No workspace plan exists; create a draft before comparing revisions."),
+            Err(error) => Self::error(error.to_string()),
+        }
     }
 
     async fn approve(context: &ToolCallContext, retry_only: bool) -> CallToolResult {
@@ -375,6 +396,8 @@ impl WorkspacePlanClient {
 
     fn tools() -> Vec<Tool> {
         vec![
+            Tool::new("revision_diff", "Read semantic changes from the last approved snapshot, affected downstream tasks and approval history. An unavailable legacy baseline is explicit, never reported as no changes.", Self::schema::<NoParams>())
+                .annotate(ToolAnnotations::from_raw(Some("Compare Plan Revision".into()), Some(true), Some(false), Some(true), Some(false))),
             Tool::new("create_template", "Seed a small_change (3 tasks) or greenfield (5 tasks) draft with typed dependencies and acceptance expectations. Never overwrites an authored plan or existing requirements; never approves it.", Self::schema::<TemplateParams>())
                 .annotate(ToolAnnotations::from_raw(Some("Create Scoped Plan Template".into()), Some(false), Some(false), Some(true), Some(false))),
             Tool::new(
@@ -458,6 +481,10 @@ impl McpClientTrait for WorkspacePlanClient {
         };
         Ok(match name {
             "status" => Self::status(context),
+            "revision_diff" => match Self::parse::<NoParams>(arguments) {
+                Ok(_) => Self::revision_diff(context),
+                Err(error) => Self::error(error),
+            },
             "create_template" => match Self::parse(arguments) {
                 Ok(params) => Self::create_template(context, params),
                 Err(error) => Self::error(error),
@@ -657,6 +684,72 @@ mod tests {
         let revised = WorkspacePlan::load(workspace.path()).unwrap().unwrap();
         assert_eq!(revised.tasks()[0].status, PlannedTaskStatus::Pending);
         assert!(!revised.is_implementation_allowed());
+    }
+
+    #[test]
+    fn workspace_plan_revision_diff_preserves_unaffected_progress_and_is_read_only() {
+        let workspace = TempDir::new().unwrap();
+        let context = context(&workspace);
+        let mut args = draft();
+        args["tasks"]
+            .as_array_mut()
+            .unwrap()
+            .push(serde_json::json!({
+                "id": "TASK-002", "title": "Independent", "description": "Independent work"
+            }));
+        assert_ne!(
+            WorkspacePlanClient::save_draft(
+                &context,
+                WorkspacePlanClient::parse(Some(args.clone())).unwrap()
+            )
+            .is_error,
+            Some(true)
+        );
+        let mut plan = WorkspacePlan::load(workspace.path()).unwrap().unwrap();
+        let mut tasks = plan.tasks().to_vec();
+        for task in &mut tasks {
+            task.status = PlannedTaskStatus::Completed;
+        }
+        plan.set_plan_content(
+            plan.description().to_string(),
+            plan.architecture_notes().to_string(),
+            tasks,
+        )
+        .unwrap();
+        plan.approve("fixture-human").unwrap();
+        plan.save(workspace.path()).unwrap();
+        args["tasks"][0]["title"] = serde_json::json!("Changed adapter");
+        assert_ne!(
+            WorkspacePlanClient::save_draft(
+                &context,
+                WorkspacePlanClient::parse(Some(args)).unwrap()
+            )
+            .is_error,
+            Some(true)
+        );
+        let revised = WorkspacePlan::load(workspace.path()).unwrap().unwrap();
+        assert_eq!(revised.tasks()[0].status, PlannedTaskStatus::Pending);
+        assert_eq!(revised.tasks()[1].status, PlannedTaskStatus::Completed);
+        assert!(!revised.is_implementation_allowed());
+        let before = std::fs::read(WorkspacePlan::plan_path(workspace.path())).unwrap();
+        let result = WorkspacePlanClient::revision_diff(&context);
+        assert_ne!(result.is_error, Some(true));
+        let output = serde_json::to_string(&result).unwrap();
+        assert!(output.contains("/tasks/TASK-001/title"));
+        assert!(output.contains("fixture-human"));
+        assert_eq!(
+            std::fs::read(WorkspacePlan::plan_path(workspace.path())).unwrap(),
+            before
+        );
+        let tools = WorkspacePlanClient::tools();
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == "revision_diff")
+            .unwrap();
+        assert_eq!(
+            tool.annotations.as_ref().unwrap().read_only_hint,
+            Some(true)
+        );
     }
 
     #[tokio::test]

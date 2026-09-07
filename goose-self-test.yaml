@@ -461,6 +461,18 @@ prompt: |
   {{ workspace_dir }}/provider_discovery.md; never mark filtered-out tests as run.
   {% endif %}
 
+  {% if test_phases == "all" or "plan-revision" in test_phases %}
+  ## ESI Plan Revision
+
+  Use Hermit and isolated configuration; never rewrite real workspace plans.
+  1. `node scripts/test-isolated.mjs cargo test --locked -p esi-workspace-plan --test revision`
+  2. `node scripts/test-isolated.mjs cargo test --locked -p goose --lib workspace_plan`
+  3. `node scripts/test-isolated.mjs cargo test --locked -p goose --lib authority_forged`
+  Verify semantic diff, affected dependencies, immutable approval snapshots,
+  unavailable legacy baselines and stale approval rejection. Missing history
+  is not proof of unchanged scope; task status is not validation evidence.
+  {% endif %}
+
   {% if test_phases == "all" or "planning-templates" in test_phases %}
   ## ESI Planning Templates
 

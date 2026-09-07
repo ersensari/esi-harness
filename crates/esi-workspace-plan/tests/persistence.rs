@@ -95,6 +95,7 @@ fn legacy_plan_load_is_read_only_and_first_save_migrates() {
     let mut legacy = serde_json::to_value(&plan).unwrap();
     legacy["schema_version"] = 1.into();
     legacy.as_object_mut().unwrap().remove("storage_revision");
+    legacy.as_object_mut().unwrap().remove("approval_history");
     let bytes = serde_json::to_vec(&legacy).unwrap();
     let path = WorkspacePlan::plan_path(root.path());
     fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -117,7 +118,7 @@ fn legacy_plan_load_is_read_only_and_first_save_migrates() {
         Err(WorkspacePlanError::Persistence(PersistenceError::Conflict))
     ));
     let stored: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
-    assert_eq!(stored["schema_version"], 3);
+    assert_eq!(stored["schema_version"], 4);
     assert_eq!(stored["storage_revision"], 1);
 }
 
