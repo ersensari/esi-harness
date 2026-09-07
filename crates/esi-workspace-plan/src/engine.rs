@@ -23,6 +23,25 @@ pub fn is_plan_transition_allowed(from: WorkspacePlanStatus, to: WorkspacePlanSt
 // ---------------------------------------------------------------------------
 
 fn compute_content_hash(plan: &WorkspacePlan) -> String {
+    if !plan.task_contracts.is_empty() {
+        let mut content = serde_json::json!({
+            "title": plan.title, "description": plan.description,
+            "architecture_notes": plan.architecture_notes, "requirements": plan.requirements,
+            "tasks": plan.tasks.iter().map(|task| serde_json::json!({
+                "id": task.id, "title": task.title, "description": task.description
+            })).collect::<Vec<_>>(),
+            "task_contracts": plan.task_contracts, "innovation_discovery": plan.innovation_discovery,
+        });
+        content.sort_all_objects();
+        let mut hasher = Sha256::new();
+        hasher.update(b"esi-workspace-plan-contract-v1\0");
+        hasher.update(serde_json::to_vec(&content).expect("typed JSON content"));
+        return hasher
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+    }
     let mut hasher = Sha256::new();
     hasher.update(plan.title.as_bytes());
     hasher.update(b"\x00");
@@ -146,6 +165,7 @@ impl WorkspacePlan {
             requirements: Vec::new(),
             architecture_notes: String::new(),
             tasks: Vec::new(),
+            task_contracts: Default::default(),
             innovation_discovery: None,
             created_at: now.clone(),
             updated_at: now,
@@ -190,6 +210,28 @@ impl WorkspacePlan {
 
     pub fn tasks(&self) -> &[PlannedTask] {
         &self.tasks
+    }
+
+    pub fn task_contracts(&self) -> &std::collections::BTreeMap<String, TaskContract> {
+        &self.task_contracts
+    }
+
+    pub fn task_execution_order(&self) -> Result<Vec<String>, WorkspacePlanError> {
+        crate::task_contract::validate(&self.requirements, &self.tasks, &self.task_contracts)
+    }
+
+    pub fn set_task_contracts(
+        &mut self,
+        contracts: std::collections::BTreeMap<String, TaskContract>,
+    ) -> Result<(), WorkspacePlanError> {
+        crate::task_contract::validate(&self.requirements, &self.tasks, &contracts)?;
+        if self.task_contracts == contracts {
+            return Ok(());
+        }
+        self.task_contracts = contracts;
+        self.touch();
+        self.emit(PlanEventKind::PlanContentUpdated);
+        self.invalidate_if_approved("task contracts updated")
     }
 
     pub fn innovation_discovery(&self) -> Option<&InnovationDiscovery> {
@@ -253,6 +295,7 @@ impl WorkspacePlan {
     /// matches the approval hash.
     pub fn is_implementation_allowed(&self) -> bool {
         self.status == WorkspacePlanStatus::Approved
+            && self.task_execution_order().is_ok()
             && self
                 .approval
                 .as_ref()
@@ -263,6 +306,7 @@ impl WorkspacePlan {
     /// describing why it is blocked. Use this as the deterministic gate
     /// before any mutating development stage.
     pub fn require_approved_plan(&self) -> Result<(), WorkspacePlanError> {
+        self.task_execution_order()?;
         if self.status != WorkspacePlanStatus::Approved {
             return Err(WorkspacePlanError::ImplementationBlocked {
                 status: self.status,
@@ -318,6 +362,7 @@ impl WorkspacePlan {
                 ));
             }
         }
+        crate::task_contract::validate(&requirements, &self.tasks, &self.task_contracts)?;
         self.requirements = requirements;
         self.touch();
         self.emit(PlanEventKind::RequirementsUpdated {
@@ -341,6 +386,7 @@ impl WorkspacePlan {
                 "plan description must be non-empty".to_string(),
             ));
         }
+        crate::task_contract::validate(&self.requirements, &tasks, &self.task_contracts)?;
         self.description = description;
         self.architecture_notes = architecture_notes;
         self.tasks = tasks;
@@ -391,6 +437,7 @@ impl WorkspacePlan {
                 "plan must have requirements and a description before approval".to_string(),
             ));
         }
+        self.task_execution_order()?;
         let hash = self.content_hash();
         let now = now_rfc3339();
         self.approval = Some(PlanApproval {
@@ -441,12 +488,16 @@ impl WorkspacePlan {
             return Ok(None);
         };
         let mut plan: Self = serde_json::from_slice(&data)?;
-        if plan.schema_version == 1 {
+        if matches!(plan.schema_version, 1 | 2) {
+            if !plan.task_contracts.is_empty() {
+                return Err(WorkspacePlanError::InvalidPersistedPlan);
+            }
             plan.schema_version = SCHEMA_VERSION;
         }
         if plan.schema_version != SCHEMA_VERSION {
             return Err(WorkspacePlanError::InvalidPersistedPlan);
         }
+        plan.task_execution_order()?;
         plan.persisted_snapshot = Some(snapshot);
         Ok(Some(plan))
     }
@@ -457,6 +508,7 @@ impl WorkspacePlan {
         if self.schema_version != SCHEMA_VERSION {
             return Err(WorkspacePlanError::InvalidPersistedPlan);
         }
+        self.task_execution_order()?;
         let mut next = self.clone();
         next.storage_revision = self
             .storage_revision

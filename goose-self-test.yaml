@@ -461,6 +461,19 @@ prompt: |
   {{ workspace_dir }}/provider_discovery.md; never mark filtered-out tests as run.
   {% endif %}
 
+  {% if test_phases == "all" or "plan-task-contract" in test_phases %}
+  ## ESI Plan Task Contract
+
+  Use Hermit and isolated configuration; do not rewrite real workspace plans.
+  1. `node scripts/test-isolated.mjs cargo test --locked -p esi-workspace-plan --test task_contract`
+  2. `node scripts/test-isolated.mjs cargo test --locked -p esi-workspace-plan`
+  3. `node scripts/test-isolated.mjs cargo test --locked -p esi-development -p esi-development-visualizer`
+  Require deterministic DAG order, duplicate/dangling/cycle rejection, atomic
+  invalid updates, schema 1/2 migration and unchanged approval for status-only
+  updates. Contract changes must invalidate approval; expectations are not evidence.
+  Record actual results; planning UI is a later phase, not claimed by these tests.
+  {% endif %}
+
   {% if test_phases == "all" or "validation-lifecycle" in test_phases %}
   ## ESI Validation Lifecycle
 

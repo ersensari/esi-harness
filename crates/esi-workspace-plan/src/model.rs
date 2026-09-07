@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use thiserror::Error;
 
-pub(crate) const SCHEMA_VERSION: u32 = 2;
+pub(crate) const SCHEMA_VERSION: u32 = 3;
 
 /// Relative path from the workspace root to the plan file.
 pub const PLAN_RELATIVE_PATH: &str = ".esi/workspace-plan.json";
@@ -85,6 +85,33 @@ pub struct PlannedTask {
     pub title: String,
     pub description: String,
     pub status: PlannedTaskStatus,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskAcceptanceCriterion {
+    pub id: String,
+    pub description: String,
+    #[serde(default)]
+    pub requirement_id: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskValidationExpectation {
+    pub id: String,
+    pub description: String,
+    pub criterion_ids: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskContract {
+    #[serde(default)]
+    pub depends_on: Vec<String>,
+    #[serde(default)]
+    pub affected_components: Vec<String>,
+    #[serde(default)]
+    pub acceptance_criteria: Vec<TaskAcceptanceCriterion>,
+    #[serde(default)]
+    pub validation_expectations: Vec<TaskValidationExpectation>,
 }
 
 // ---------------------------------------------------------------------------
@@ -201,6 +228,8 @@ pub struct WorkspacePlan {
     pub(crate) requirements: Vec<Requirement>,
     pub(crate) architecture_notes: String,
     pub(crate) tasks: Vec<PlannedTask>,
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub(crate) task_contracts: std::collections::BTreeMap<String, TaskContract>,
     pub(crate) innovation_discovery: Option<InnovationDiscovery>,
     pub(crate) created_at: String,
     pub(crate) updated_at: String,

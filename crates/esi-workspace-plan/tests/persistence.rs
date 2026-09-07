@@ -117,7 +117,7 @@ fn legacy_plan_load_is_read_only_and_first_save_migrates() {
         Err(WorkspacePlanError::Persistence(PersistenceError::Conflict))
     ));
     let stored: serde_json::Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
-    assert_eq!(stored["schema_version"], 2);
+    assert_eq!(stored["schema_version"], 3);
     assert_eq!(stored["storage_revision"], 1);
 }
 
