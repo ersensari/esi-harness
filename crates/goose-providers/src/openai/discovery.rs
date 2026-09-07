@@ -75,11 +75,20 @@ fn parse_profile(entry: &Value, catalog: Option<&Value>, model: &str) -> Option<
         (entry["owned_by"] == "unsloth-studio")
             .then(|| positive(&entry["context_length"]))
             .flatten()
-    })?;
-    Some(ModelProfile {
-        context_limit: Some(context),
-        ..Default::default()
-    })
+    });
+    if let Some(context) = context {
+        return Some(ModelProfile {
+            context_limit: Some(context),
+            ..Default::default()
+        });
+    }
+    // Restricted gateway keys often cannot read model/info. Their visible
+    // model cards still publish input/output budgets; no elevated key is needed.
+    litellm_profile(&json!({"model_info": entry, "litellm_params": {}}))
+}
+
+pub(super) fn visible_context(entry: &Value) -> Option<usize> {
+    parse_profile(entry, None, entry["id"].as_str()?).and_then(|profile| profile.context_limit)
 }
 
 fn litellm_profile(row: &Value) -> Option<ModelProfile> {
@@ -272,6 +281,80 @@ mod tests {
         let start = std::time::Instant::now();
         assert!(provider.advertised_model_profile("alias").await.is_none());
         assert!(start.elapsed() < std::time::Duration::from_secs(7));
+    }
+
+    #[tokio::test]
+    async fn discovery_restricted_key_uses_visible_model_budgets_when_info_is_forbidden() {
+        let server = MockServer::start().await;
+        let provider = super::super::OpenAiProviderBuilder::new(
+            ApiClient::new_with_tls(
+                server.uri(),
+                AuthMethod::BearerToken("restricted-fixture".into()),
+                None,
+            )
+            .unwrap(),
+        )
+        .name("custom_restricted_fixture")
+        .build();
+        Mock::given(path("/v1/models"))
+            .and(header("Authorization", "Bearer restricted-fixture"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"data":[{
+                "id":"alias", "max_input_tokens":229376, "max_output_tokens":32768
+            }]})))
+            .mount(&server)
+            .await;
+        Mock::given(path("/model/info"))
+            .respond_with(ResponseTemplate::new(403))
+            .mount(&server)
+            .await;
+        let profile = provider.advertised_model_profile("alias").await.unwrap();
+        assert_eq!(profile.context_limit, Some(262144));
+        assert_eq!(profile.max_tokens, Some(32768));
+        assert_eq!(profile.thinking_protocol, ThinkingProtocol::None);
+        assert_eq!(
+            provider.advertised_context_limit("alias").await,
+            Some(262144)
+        );
+        assert!(provider
+            .advertised_context_limit("different-model")
+            .await
+            .is_none());
+        assert_eq!(
+            provider
+                .get_context_limit(&crate::model::ModelConfig::new("alias"))
+                .await
+                .unwrap(),
+            262144
+        );
+        assert!(provider
+            .advertised_model_profile("different-model")
+            .await
+            .is_none());
+    }
+
+    #[test]
+    fn discovery_visible_budgets_validate_overflow_missing_and_exact_context() {
+        let entry = json!({"id":"alias", "max_input_tokens":229376,"max_output_tokens":32768});
+        assert_eq!(
+            parse_profile(&entry, None, "alias").unwrap().context_limit,
+            Some(262144)
+        );
+        let mut explicit = entry.clone();
+        explicit["context_window"] = json!(131072);
+        assert_eq!(
+            parse_profile(&explicit, None, "alias")
+                .unwrap()
+                .context_limit,
+            Some(131072)
+        );
+        let overflow = json!({"id":"alias", "max_input_tokens":u64::MAX,"max_output_tokens":32768});
+        assert!(parse_profile(&overflow, None, "alias").is_none_or(|p| p.context_limit.is_none()));
+        assert!(parse_profile(
+            &json!({"id":"alias","max_context_length":1048576}),
+            None,
+            "alias"
+        )
+        .is_none());
     }
     fn row() -> Value {
         json!({"model_name":"alias", "model_info":{"max_input_tokens":229376,"max_output_tokens":32768,

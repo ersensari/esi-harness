@@ -455,6 +455,8 @@ prompt: |
   3. `node scripts/test-isolated.mjs cargo test --locked --release -p goose --test model_profiles`
   Verify authenticated bounded discovery, advertised wire values, exact model
   matching, unavailable metadata, manual priority and preserved session snapshots.
+  Include restricted keys: model/info may return 403 while exact visible model
+  cards supply context budgets. Auto must read those budgets without admin access.
   All commands must pass with unchanged config digests. Record actual results in
   {{ workspace_dir }}/provider_discovery.md; never mark filtered-out tests as run.
   {% endif %}

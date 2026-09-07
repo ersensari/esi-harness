@@ -596,7 +596,7 @@ fn parse_model_ids(json: &serde_json::Value) -> Result<Vec<String>, ProviderErro
     Ok(model_ids)
 }
 
-/// Extract `meta.n_ctx` for `model_name` from a `/v1/models` response body.
+/// Extract allocated context or explicit visible budgets for an exact model ID.
 fn parse_n_ctx_from_models(json: &serde_json::Value, model_name: &str) -> Option<usize> {
     let data = json.get("data")?.as_array()?;
 
@@ -613,11 +613,14 @@ fn parse_n_ctx_from_models(json: &serde_json::Value, model_name: &str) -> Option
             .filter(|v| *v > 0)
     };
 
-    if let Some(entry) = data
+    let mut matches = data
         .iter()
-        .find(|e| e.get("id").and_then(|v| v.as_str()) == Some(model_name))
-    {
-        return n_ctx(entry);
+        .filter(|e| e.get("id").and_then(|v| v.as_str()) == Some(model_name));
+    if let Some(entry) = matches.next() {
+        if matches.next().is_some() {
+            return None;
+        }
+        return discovery::visible_context(entry);
     }
 
     // For single-model servers without --alias, llama.cpp reports the loaded model

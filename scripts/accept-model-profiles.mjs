@@ -13,6 +13,7 @@ const { chromium } = require('playwright');
 const [executable, reportPath, loop = 'legacy', mode = 'manual'] = process.argv.slice(2);
 const discovery = mode === 'discovery';
 const trust = mode === 'trust';
+const restricted = mode === 'restricted-discovery';
 assert(executable?.startsWith('/') && reportPath?.startsWith('/'));
 const root = await mkdtemp(join(tmpdir(), 'forgeloop-ai-model-profiles-'));
 const gooseRoot = join(root, 'goose'), profile = join(root, 'desktop'), workspace = join(root, 'workspace');
@@ -28,6 +29,7 @@ async function until(fn, label, timeout = 30000) {
   throw new Error(`Timeout: ${label}`);
 }
 const server = createServer(async (req, res) => {
+  if (restricted && req.url === '/model/info') { res.writeHead(403); return res.end('{}'); }
   if (discovery && req.url === '/model/info') {
     res.setHeader('content-type', 'application/json');
     return res.end(JSON.stringify({ data: [{ model_name: 'manual',
@@ -39,7 +41,9 @@ const server = createServer(async (req, res) => {
   }
   if (req.url === '/v1/models') {
     res.setHeader('content-type', 'application/json');
-    return res.end(JSON.stringify({ data: [{ id: 'manual', owned_by: 'unsloth-studio', context_length: 32768 }] }));
+    return res.end(JSON.stringify({ data: [restricted
+      ? { id: 'manual', max_input_tokens: 229376, max_output_tokens: 32768 }
+      : { id: 'manual', owned_by: 'unsloth-studio', context_length: 32768 }] }));
   }
   if (req.url !== '/v1/chat/completions') { res.writeHead(404); return res.end(); }
   let raw = '';
@@ -72,6 +76,10 @@ await writeFile(join(gooseRoot, 'config/config.yaml'), JSON.stringify({
   GOOSE_TELEMETRY_ENABLED: false, GOOSE_MODE: trust ? 'auto' : 'chat',
   extensions: trust ? { todo: { type: 'platform', name: 'todo', enabled: true, description: '' },
     developer: { type: 'platform', name: 'developer', enabled: true, description: '' } } : {},
+  ...(restricted ? { 'ESI_MODEL_PROFILE:["custom_profile_fixture","manual"]': {
+    context_limit: null, max_tokens: null, thinking_protocol: 'reasoning_effort', thinking_effort: 'low',
+    extended_sampling: false, preserve_thinking: false,
+  } } : {}),
 }));
 await writeFile(join(profile, 'settings.json'), JSON.stringify({ language: 'en', disableAutoDownload: true, enableNotifications: false, showMenuBarIcon: false }));
 const env = Object.fromEntries(['PATH', 'DISPLAY', 'XAUTHORITY', 'LANG'].filter(k => process.env[k]).map(k => [k, process.env[k]]));
@@ -131,7 +139,26 @@ async function send(page, text) {
 }
 try {
   let page = await launch();
-  if (trust) {
+  if (restricted) {
+    await page.getByRole('button', { name: 'Model settings', exact: true }).click();
+    await page.getByText(/Effective context: 262,144/).waitFor();
+    assert.equal(await page.getByLabel('Context limit (tokens)', { exact: true }).inputValue(), '');
+    await page.keyboard.press('Escape');
+    await send(page, 'POST148 restricted provider context');
+    const sessionId = new URLSearchParams(new URL(page.url()).hash.split('?')[1]).get('resumeSessionId');
+    assert(sessionId);
+    const state = await rpc(page, '_goose/esi/model-profile/read', { ...target, sessionId });
+    assert.equal(state.contextLimit, 262144); assert.equal(state.serverContextLimit, 262144);
+    assert.equal(state.profile.context_limit, null);
+    pass('manual sampling profile with context Auto detects visible budgets despite model/info 403');
+    await rpc(page, '_goose/esi/model-profile/save', { ...target, profile: null });
+    await rpc(page, '_goose/esi/model-profile/apply', { ...target, sessionId });
+    const automatic = await rpc(page, '_goose/esi/model-profile/read', { ...target, sessionId });
+    assert.equal(automatic.contextLimit, 262144);
+    assert.equal(automatic.sessionProfile.context_limit, 262144);
+    assert.equal(automatic.sessionProfile.max_tokens, 32768);
+    pass('fully automatic profile snapshots visible context and output budgets without privileged metadata');
+  } else if (trust) {
     assert.equal((await rpc(page, '_goose/esi/extension-trust', { configKey: 'todo' })).trusted, false);
     await until(async () => {
       if (await page.locator('#extension-todo').count()) return true;
