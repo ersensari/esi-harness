@@ -257,6 +257,7 @@ pub(crate) async fn execute(
                     let identity = WorkspacePlan::new(&root, "identity")?;
                     Config::global().set_param(&receipt_key(&identity), Value::Null)?;
                 }
+                "create_template" => {}
                 "retry_memory_sync" => {
                     require_receipt(&root)?;
                 }

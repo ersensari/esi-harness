@@ -5,9 +5,16 @@ description: Execute software-development work with normal ESI-Studio tools whil
 
 Use this skill for writable software-development tasks managed by ESI-Studio.
 
-## Workspace plan gate (mandatory — ADR-0010)
+## Choose the execution policy first (ADR-0020)
 
-Before any coding, file edits, package installation, or shell implementation can happen, the workspace must have an **approved workspace plan**. This is enforced by the development controller in code — it is not optional.
+Trusted extensions may execute their native tools without workspace-plan containment,
+subject to the operator's ordinary tool permissions. Do not invent a blanket plan
+approval requirement for that trusted workflow. Trust does not manufacture human
+approval, validation evidence, or controller completion.
+
+When using the structured ESI development controller, its approved workspace plan,
+worktree binding and evidence gates remain mandatory. Follow the workflow below
+for controller-managed work; keep ordinary trusted-tool work clearly distinct.
 
 ### When starting work in a workspace:
 
@@ -17,7 +24,11 @@ Before any coding, file edits, package installation, or shell implementation can
    - Ask what they want to build and why
    - Identify acceptance criteria for each requirement
    - Prioritize requirements using MoSCoW (Must/Should/Could/Won't)
-   - For greenfield/innovative work, run Innovation discovery: research the problem space, evaluate candidate approaches, and document the selected approach
+   - For a small change, call `workspaceplan__create_template` with `template: small_change`;
+     this creates three bounded tasks, not a full-project discovery interview.
+   - For a new project, use `template: greenfield` (five tasks), and investigate
+     alternatives only where the scope actually needs an architecture decision.
+   - Template creation never overwrites an authored plan or existing requirements.
 3. **If the plan exists but is not approved**: Continue from the current plan status:
    - **Discovery** → continue gathering requirements
    - **Planning** → help design the implementation plan, architecture, and tasks
@@ -29,6 +40,11 @@ Before any coding, file edits, package installation, or shell implementation can
 - After requirements and implementation plan are complete, present them to the user for approval.
 - Persist the complete draft with `workspaceplan__save_draft`; do not hand-author
   approval hashes or approval events.
+- Refine `task_contracts` keyed by task ID: `depends_on`, `affected_components`,
+  `acceptance_criteria` (`id`, `description`, optional `requirement_id`) and
+  `validation_expectations` (`id`, `description`, `criterion_ids`). Expectations
+  describe future checks; they are not successful validation evidence. Status
+  returns contracts and deterministic `task_execution_order` for reuse across chats.
 - The user must explicitly approve the plan. You cannot approve it yourself.
 - Only after the user accepts the displayed plan, call `workspaceplan__approve`.
   Desktop always presents a confirmation for this tool, even in automatic mode.
@@ -52,7 +68,9 @@ The workspace plan persists at `.esi/workspace-plan.json`. When a new chat opens
 - Never approve worktree readiness, plan approval, extra repairs, completion, or abandonment yourself.
 - Never claim completion while a required validator is failed, missing, or stale.
 - Never call ForgeLoop, a private endpoint, or another remote orchestrator. This workflow is local and provider-neutral.
-- **Never attempt to write code, edit files, install packages, or run implementation commands while the workspace plan is not approved.** The controller will reject these attempts.
+- For controller-managed work, do not run implementation outside its approved
+  plan/worktree. For ordinary trusted extension work, honor the operator's Trust
+  and tool permissions without adding this controller prerequisite.
 
 ## Workflow
 

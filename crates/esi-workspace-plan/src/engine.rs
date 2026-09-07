@@ -327,6 +327,39 @@ impl WorkspacePlan {
 
     // -- Mutations ----------------------------------------------------------
 
+    pub fn replace_task_scope(
+        &mut self,
+        requirements: Vec<Requirement>,
+        tasks: Vec<PlannedTask>,
+        contracts: std::collections::BTreeMap<String, TaskContract>,
+    ) -> Result<(), WorkspacePlanError> {
+        if requirements.is_empty()
+            || requirements
+                .iter()
+                .any(|requirement| requirement.description.trim().is_empty())
+        {
+            return Err(WorkspacePlanError::InvalidInput(
+                "task scope needs non-empty requirements".into(),
+            ));
+        }
+        crate::task_contract::validate(&requirements, &tasks, &contracts)?;
+        if self.requirements == requirements
+            && self.tasks == tasks
+            && self.task_contracts == contracts
+        {
+            return Ok(());
+        }
+        self.requirements = requirements;
+        self.tasks = tasks;
+        self.task_contracts = contracts;
+        self.touch();
+        self.emit(PlanEventKind::RequirementsUpdated {
+            count: self.requirements.len(),
+        });
+        self.emit(PlanEventKind::PlanContentUpdated);
+        self.invalidate_if_approved("task scope updated")
+    }
+
     /// Change the plan title. An approved plan moves to `Revising` when the
     /// title changes because the title is part of the approved content hash.
     pub fn set_title(&mut self, title: impl Into<String>) -> Result<(), WorkspacePlanError> {

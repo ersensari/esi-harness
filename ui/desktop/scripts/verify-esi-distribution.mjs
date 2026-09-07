@@ -114,6 +114,11 @@ for (const expected of [
   'provider-neutral',
   'esi-development-visualizer__show_development_loop',
   'workspace_path',
+  'workspaceplan__create_template',
+  'small_change',
+  'greenfield',
+  'task_contracts',
+  'Trusted extensions may execute their native tools without workspace-plan containment',
 ]) {
   assert.ok(developmentSkill.includes(expected), `missing development skill contract: ${expected}`);
 }

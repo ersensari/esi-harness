@@ -18,6 +18,30 @@ struct Fixture {
     ctx: ToolCallContext,
 }
 
+#[tokio::test]
+async fn workspace_plan_template_factory_dispatch_does_not_grant_execution_approval() {
+    let fixture = Fixture::new().await;
+    let result = fixture
+        .call(
+            "workspaceplan__create_template",
+            json!({
+                "template":"small_change", "title":"Scoped fix", "objective":"Fix one behavior"
+            }),
+        )
+        .await
+        .unwrap();
+    assert_ne!(result.is_error, Some(true));
+    let plan = WorkspacePlan::load(fixture.root.path()).unwrap().unwrap();
+    assert_eq!(plan.tasks().len(), 3);
+    assert!(!plan.is_implementation_allowed());
+    assert!(require_receipt(fixture.root.path()).is_err());
+    assert!(fixture
+        .call("shell", json!({"command":"touch must-not-exist"}))
+        .await
+        .is_err());
+    assert!(!fixture.root.path().join("must-not-exist").exists());
+}
+
 fn platform(name: &str) -> ExtensionConfig {
     ExtensionConfig::Platform {
         name: name.into(),

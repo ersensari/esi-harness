@@ -87,7 +87,8 @@ pub struct PlannedTask {
     pub status: PlannedTaskStatus,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TaskAcceptanceCriterion {
     pub id: String,
     pub description: String,
@@ -95,14 +96,16 @@ pub struct TaskAcceptanceCriterion {
     pub requirement_id: Option<String>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TaskValidationExpectation {
     pub id: String,
     pub description: String,
     pub criterion_ids: Vec<String>,
 }
 
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(deny_unknown_fields)]
 pub struct TaskContract {
     #[serde(default)]
     pub depends_on: Vec<String>,
@@ -112,6 +115,13 @@ pub struct TaskContract {
     pub acceptance_criteria: Vec<TaskAcceptanceCriterion>,
     #[serde(default)]
     pub validation_expectations: Vec<TaskValidationExpectation>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum PlanningTemplate {
+    SmallChange,
+    Greenfield,
 }
 
 // ---------------------------------------------------------------------------

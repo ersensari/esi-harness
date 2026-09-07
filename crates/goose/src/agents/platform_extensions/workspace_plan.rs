@@ -2,7 +2,8 @@ use std::path::Path;
 
 use async_trait::async_trait;
 use esi_workspace_plan::{
-    InnovationDiscovery, PlannedTask, PlannedTaskStatus, Priority, Requirement, WorkspacePlan,
+    InnovationDiscovery, PlannedTask, PlannedTaskStatus, PlanningTemplate, Priority, Requirement,
+    TaskContract, WorkspacePlan,
 };
 use rmcp::model::{
     Annotations, CallToolResult, ContentBlock, Implementation, InitializeResult, JsonObject,
@@ -73,6 +74,16 @@ struct SaveDraftParams {
     requirements: Vec<RequirementInput>,
     tasks: Vec<TaskInput>,
     innovation: Option<InnovationInput>,
+    #[serde(default)]
+    task_contracts: Option<std::collections::BTreeMap<String, TaskContract>>,
+}
+
+#[derive(Debug, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields)]
+struct TemplateParams {
+    template: PlanningTemplate,
+    title: String,
+    objective: String,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
@@ -90,7 +101,9 @@ impl WorkspacePlanClient {
             )
             .with_instructions(
                 "Use status first. For an unplanned workspace, discuss requirements and \
-                 Innovation options with the user, then save_draft. Call approve only after the \
+                 Innovation options appropriate to scope. Use create_template for small_change \
+                 or greenfield only when no authored plan exists; use save_draft to refine it. \
+                 Existing plans must be reused. Trusted native tools follow operator policy. Call approve only after the \
                  user explicitly accepts the displayed plan; Desktop will ask the user to confirm.",
             );
         Ok(Self { info })
@@ -144,6 +157,8 @@ impl WorkspacePlanClient {
                     "requirements": plan.requirements(),
                     "architecture_notes": plan.architecture_notes(),
                     "tasks": plan.tasks(),
+                    "task_contracts": plan.task_contracts(),
+                    "task_execution_order": plan.task_execution_order().unwrap_or_default(),
                     "innovation": plan.innovation_discovery(),
                     "approval": plan.approval(),
                     "revision_count": plan.revision_count(),
@@ -179,6 +194,15 @@ impl WorkspacePlanClient {
             },
             Err(error) => return Self::error(format!("Could not read workspace plan: {error}")),
         };
+        let original_hash = plan.content_hash();
+        let contracts = params
+            .task_contracts
+            .unwrap_or_else(|| plan.task_contracts().clone());
+        let previous_statuses: std::collections::BTreeMap<_, _> = plan
+            .tasks()
+            .iter()
+            .map(|task| (task.id.clone(), task.status))
+            .collect();
         if let Err(error) = plan.set_title(params.title) {
             return Self::error(error.to_string());
         }
@@ -192,9 +216,6 @@ impl WorkspacePlanClient {
                 priority: requirement.priority.into(),
             })
             .collect();
-        if let Err(error) = plan.set_requirements(requirements) {
-            return Self::error(error.to_string());
-        }
         if let Some(innovation) = params.innovation {
             if let Err(error) = plan.set_innovation_discovery(InnovationDiscovery {
                 brief: innovation.brief,
@@ -209,16 +230,37 @@ impl WorkspacePlanClient {
             .tasks
             .into_iter()
             .map(|task| PlannedTask {
+                status: previous_statuses
+                    .get(&task.id)
+                    .copied()
+                    .unwrap_or(PlannedTaskStatus::Pending),
                 id: task.id,
                 title: task.title,
                 description: task.description,
-                status: PlannedTaskStatus::Pending,
             })
-            .collect();
+            .collect::<Vec<_>>();
+        if let Err(error) = plan.replace_task_scope(requirements, tasks.clone(), contracts) {
+            return Self::error(error.to_string());
+        }
         if let Err(error) =
             plan.set_plan_content(params.description, params.architecture_notes, tasks)
         {
             return Self::error(error.to_string());
+        }
+        if plan.content_hash() != original_hash {
+            // Old completion labels are not evidence for revised scope. Until the
+            // revision-diff phase identifies affected tasks, conservatively reset progress.
+            let mut tasks = plan.tasks().to_vec();
+            for task in &mut tasks {
+                task.status = PlannedTaskStatus::Pending;
+            }
+            if let Err(error) = plan.set_plan_content(
+                plan.description().to_string(),
+                plan.architecture_notes().to_string(),
+                tasks,
+            ) {
+                return Self::error(error.to_string());
+            }
         }
         if let Err(error) = plan.save(workspace) {
             return Self::error(format!("Could not save workspace plan: {error}"));
@@ -228,6 +270,31 @@ impl WorkspacePlanClient {
              approval before calling workspaceplan__approve.",
             plan.status().display_message()
         ))])
+    }
+
+    fn create_template(context: &ToolCallContext, params: TemplateParams) -> CallToolResult {
+        let workspace = match Self::workspace(context) {
+            Ok(value) => value,
+            Err(error) => return Self::error(error),
+        };
+        let mut plan = match WorkspacePlan::load(workspace) {
+            Ok(Some(plan)) => plan,
+            Ok(None) => match WorkspacePlan::new(workspace, params.title) {
+                Ok(plan) => plan,
+                Err(error) => return Self::error(error.to_string()),
+            },
+            Err(error) => return Self::error(error.to_string()),
+        };
+        match plan.apply_template(params.template, &params.objective) {
+            Ok(true) => {
+                if let Err(error) = plan.save(workspace) {
+                    return Self::error(error.to_string());
+                }
+            }
+            Ok(false) => return Self::status(context),
+            Err(error) => return Self::error(error.to_string()),
+        }
+        Self::status(context)
     }
 
     async fn approve(context: &ToolCallContext, retry_only: bool) -> CallToolResult {
@@ -308,6 +375,8 @@ impl WorkspacePlanClient {
 
     fn tools() -> Vec<Tool> {
         vec![
+            Tool::new("create_template", "Seed a small_change (3 tasks) or greenfield (5 tasks) draft with typed dependencies and acceptance expectations. Never overwrites an authored plan or existing requirements; never approves it.", Self::schema::<TemplateParams>())
+                .annotate(ToolAnnotations::from_raw(Some("Create Scoped Plan Template".into()), Some(false), Some(false), Some(true), Some(false))),
             Tool::new(
                 "retry_memory_sync",
                 "Retry bounded Wiki capture of the already-approved plan. Never grants approval or sends chat history.",
@@ -379,13 +448,20 @@ impl McpClientTrait for WorkspacePlanClient {
         arguments: Option<JsonObject>,
         _cancellation_token: CancellationToken,
     ) -> Result<CallToolResult, Error> {
-        let _write_guard = if matches!(name, "save_draft" | "approve" | "retry_memory_sync") {
+        let _write_guard = if matches!(
+            name,
+            "create_template" | "save_draft" | "approve" | "retry_memory_sync"
+        ) {
             Some(PLAN_WRITE_LOCK.lock().await)
         } else {
             None
         };
         Ok(match name {
             "status" => Self::status(context),
+            "create_template" => match Self::parse(arguments) {
+                Ok(params) => Self::create_template(context, params),
+                Err(error) => Self::error(error),
+            },
             "save_draft" => match Self::parse(arguments) {
                 Ok(params) => Self::save_draft(context, params),
                 Err(error) => Self::error(error),
@@ -456,6 +532,131 @@ mod tests {
         .as_object()
         .unwrap()
         .clone()
+    }
+
+    #[tokio::test]
+    async fn workspace_plan_templates_are_typed_scoped_and_idempotent_across_chats() {
+        let data = TempDir::new().unwrap();
+        let workspace = TempDir::new().unwrap();
+        let client = client(&data);
+        let first_context = context(&workspace);
+        let args = serde_json::json!({"template":"small_change", "title":"Fix button", "objective":"Button submits once"}).as_object().unwrap().clone();
+        let result = client
+            .call_tool(
+                &first_context,
+                "create_template",
+                Some(args.clone()),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(result.is_error, Some(true));
+        let plan = WorkspacePlan::load(workspace.path()).unwrap().unwrap();
+        assert_eq!(plan.tasks().len(), 3);
+        assert_eq!(plan.task_contracts().len(), 3);
+        let bytes = std::fs::read(WorkspacePlan::plan_path(workspace.path())).unwrap();
+        let second = ToolCallContext::new(
+            "other-chat".into(),
+            Some(workspace.path().into()),
+            Some("other-request".into()),
+        );
+        let result = client
+            .call_tool(
+                &second,
+                "create_template",
+                Some(args),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        assert_ne!(result.is_error, Some(true));
+        assert_eq!(
+            std::fs::read(WorkspacePlan::plan_path(workspace.path())).unwrap(),
+            bytes
+        );
+        let status = serde_json::to_string(&WorkspacePlanClient::status(&second)).unwrap();
+        assert!(status.contains("task_contracts") && status.contains("task_execution_order"));
+        let tools = WorkspacePlanClient::tools();
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == "create_template")
+            .unwrap();
+        let schema = serde_json::to_string(&tool.input_schema).unwrap();
+        assert!(schema.contains("small_change") && schema.contains("greenfield"));
+    }
+
+    #[test]
+    fn workspace_plan_save_draft_preserves_contracts_and_progress_and_rejects_bad_replacement() {
+        let workspace = TempDir::new().unwrap();
+        let context = context(&workspace);
+        WorkspacePlanClient::save_draft(
+            &context,
+            WorkspacePlanClient::parse(Some(draft())).unwrap(),
+        );
+        let mut plan = WorkspacePlan::load(workspace.path()).unwrap().unwrap();
+        plan.set_task_contracts(std::collections::BTreeMap::from([(
+            "TASK-001".into(),
+            TaskContract::default(),
+        )]))
+        .unwrap();
+        let mut tasks = plan.tasks().to_vec();
+        tasks[0].status = PlannedTaskStatus::Completed;
+        plan.set_plan_content(
+            plan.description().to_string(),
+            plan.architecture_notes().to_string(),
+            tasks,
+        )
+        .unwrap();
+        plan.approve("fixture-human").unwrap();
+        plan.save(workspace.path()).unwrap();
+        let hash = plan.content_hash();
+        let result = WorkspacePlanClient::save_draft(
+            &context,
+            WorkspacePlanClient::parse(Some(draft())).unwrap(),
+        );
+        assert_ne!(result.is_error, Some(true));
+        let current = WorkspacePlan::load(workspace.path()).unwrap().unwrap();
+        assert_eq!(current.content_hash(), hash);
+        assert!(current.is_implementation_allowed());
+        assert_eq!(current.tasks()[0].status, PlannedTaskStatus::Completed);
+        assert_eq!(current.task_contracts().len(), 1);
+        let before = std::fs::read(WorkspacePlan::plan_path(workspace.path())).unwrap();
+        let mut invalid = draft();
+        invalid.insert(
+            "task_contracts".into(),
+            serde_json::json!({"TASK-001":{"depends_on":["missing"]}}),
+        );
+        let result = WorkspacePlanClient::save_draft(
+            &context,
+            WorkspacePlanClient::parse(Some(invalid)).unwrap(),
+        );
+        assert_eq!(result.is_error, Some(true));
+        assert_eq!(
+            std::fs::read(WorkspacePlan::plan_path(workspace.path())).unwrap(),
+            before
+        );
+        let mut typo = draft();
+        typo.insert(
+            "task_contracts".into(),
+            serde_json::json!({"TASK-001":{"dependsOn":["missing"]}}),
+        );
+        assert!(WorkspacePlanClient::parse::<SaveDraftParams>(Some(typo)).is_err());
+        let mut changed = draft();
+        changed.insert(
+            "description".into(),
+            serde_json::json!("Different required behavior"),
+        );
+        assert_ne!(
+            WorkspacePlanClient::save_draft(
+                &context,
+                WorkspacePlanClient::parse(Some(changed)).unwrap()
+            )
+            .is_error,
+            Some(true)
+        );
+        let revised = WorkspacePlan::load(workspace.path()).unwrap().unwrap();
+        assert_eq!(revised.tasks()[0].status, PlannedTaskStatus::Pending);
+        assert!(!revised.is_implementation_allowed());
     }
 
     #[tokio::test]

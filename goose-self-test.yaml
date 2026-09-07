@@ -461,6 +461,18 @@ prompt: |
   {{ workspace_dir }}/provider_discovery.md; never mark filtered-out tests as run.
   {% endif %}
 
+  {% if test_phases == "all" or "planning-templates" in test_phases %}
+  ## ESI Planning Templates
+
+  Use Hermit and isolated configuration:
+  1. `node scripts/test-isolated.mjs cargo test --locked -p esi-workspace-plan --test templates`
+  2. `node scripts/test-isolated.mjs cargo test --locked -p goose --lib workspace_plan`
+  3. `node scripts/test-isolated.mjs cargo test --locked -p esi-workspace-plan`
+  Verify small_change/greenfield shape, preserved authored content and requirements
+  across chats, typed contracts, progress preservation and atomic bad-draft rejection.
+  Do not claim a template supplies human approval or completed validation evidence.
+  {% endif %}
+
   {% if test_phases == "all" or "plan-task-contract" in test_phases %}
   ## ESI Plan Task Contract
 
