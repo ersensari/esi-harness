@@ -170,6 +170,17 @@ fn projection_shows_workspace_plan_and_innovation_approval() {
     assert_eq!(plan.tasks.len(), 1);
     assert_eq!(plan.innovation.unwrap().candidates, ["Inline panel"]);
     assert_eq!(plan.approval.unwrap().approved_by, "planner@example.com");
+    let persisted = WorkspacePlan::load(&source_path(temp.path()))
+        .unwrap()
+        .unwrap();
+    assert_eq!(plan.content_hash, Some(persisted.content_hash()));
+    assert_eq!(plan.storage_revision, persisted.storage_revision());
+    assert_eq!(
+        plan.task_execution_order,
+        persisted.task_execution_order().unwrap()
+    );
+    assert_eq!(plan.revision_diff, Some(persisted.revision_diff()));
+    assert_eq!(plan.approval_history.len(), 1);
 }
 
 #[test]

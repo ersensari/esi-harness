@@ -16,7 +16,9 @@ use crate::agents::{mcp_client::McpClientTrait, ToolCallContext};
 use crate::config::Config;
 use crate::session::SessionManager;
 
+mod plan_review;
 mod sandbox;
+pub(crate) use plan_review::native_plan_review;
 
 // Serializes local mutations and approval invalidation across managers/chats.
 // External trusted operators are not participants in this in-process lock.
@@ -45,6 +47,25 @@ fn receipt_key(plan: &WorkspacePlan) -> String {
 fn receipt(plan: &WorkspacePlan) -> Value {
     json!({"workspace": plan.canonical_path(), "hash": plan.content_hash(),
         "revision": plan.revision_count(), "approval": plan.approval()})
+}
+
+fn plan_presentation(plan: &WorkspacePlan) -> Value {
+    json!({"workspace": plan.canonical_path(), "title": plan.title(),
+        "description": plan.description(), "requirements": plan.requirements(),
+        "architecture": plan.architecture_notes(), "tasks": plan.tasks(),
+        "innovation": plan.innovation_discovery(), "task_contracts": plan.task_contracts(),
+        "revision_diff": plan.revision_diff(), "revision": plan.storage_revision(),
+        "hash": plan.content_hash()})
+}
+
+fn commit_human_plan(plan: &mut WorkspacePlan, root: &Path) -> Result<()> {
+    if plan.is_implementation_allowed() {
+        plan.request_revision("Fresh explicit human approval")?;
+    }
+    plan.approve("desktop-user")?;
+    plan.save(root)?;
+    Config::global().set_param(&receipt_key(plan), receipt(plan))?;
+    Ok(())
 }
 
 pub(crate) fn require_receipt(workspace: &Path) -> Result<WorkspacePlan> {
@@ -208,13 +229,7 @@ pub(crate) async fn execute(
         let request = ctx.tool_call_request_id.clone().context(
             "Approval requires an interactive human request; direct app calls cannot approve",
         )?;
-        let presented = serde_json::to_string_pretty(&json!({
-            "workspace": root, "title": plan.title(), "description": plan.description(),
-            "requirements": plan.requirements(), "architecture": plan.architecture_notes(),
-            "tasks": plan.tasks(), "innovation": plan.innovation_discovery(),
-            "task_contracts": plan.task_contracts(), "revision_diff": plan.revision_diff(),
-            "revision": plan.storage_revision(), "hash": plan.content_hash()
-        }))?;
+        let presented = serde_json::to_string_pretty(&plan_presentation(&plan))?;
         let human_bridge = sessions.action_required();
         let decision = tokio::select! {
             _ = cancellation.cancelled() => bail!("Approval cancelled"),
@@ -233,12 +248,7 @@ pub(crate) async fn execute(
         ensure!(!cancellation.is_cancelled(), "Approval cancelled");
         // CAS save consumes the snapshot presented to the user; a concurrent
         // revision cannot be silently approved, even if content later returns.
-        if plan.is_implementation_allowed() {
-            plan.request_revision("Fresh explicit human approval")?;
-        }
-        plan.approve("desktop-user")?;
-        plan.save(&root)?;
-        Config::global().set_param(&receipt_key(&plan), receipt(&plan))?;
+        commit_human_plan(&mut plan, &root)?;
         return client
             .call_tool(&ctx, "retry_memory_sync", None, cancellation)
             .await

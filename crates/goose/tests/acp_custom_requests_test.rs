@@ -28,6 +28,61 @@ const DEFAULT_ACP_TEST_CONFIG: &str =
 
 #[test]
 #[serial]
+fn native_plan_review_private_acp_roundtrip_is_not_an_agent_tool() {
+    write_acp_global_config(DEFAULT_ACP_TEST_CONFIG);
+    run_test(async {
+        use esi_workspace_plan::{PlanningTemplate, WorkspacePlan};
+        let cwd = tempfile::tempdir().unwrap();
+        let root = cwd.path().to_path_buf();
+        let mut plan = WorkspacePlan::new(&root, "Canvas test").unwrap();
+        plan.apply_template(PlanningTemplate::SmallChange, "Fix one behavior")
+            .unwrap();
+        plan.save(&root).unwrap();
+        let openai = OpenAiFixture::new(vec![], Arc::new(EnforceSessionId::default())).await;
+        let mut conn = AcpServerConnection::new(
+            TestConnectionConfig {
+                cwd: Some(cwd),
+                ..Default::default()
+            },
+            openai,
+        )
+        .await;
+        let SessionData { session, .. } = conn.new_session().await.unwrap();
+        let id = session.session_id().0.clone();
+        let review = send_custom(conn.cx(), "_goose/esi/plan-review", serde_json::json!({
+            "action":"prepare", "session_id":id, "hash":plan.content_hash(), "storage_revision":plan.storage_revision()
+        })).await.unwrap();
+        assert_eq!(review["scope"]["hash"], plan.content_hash());
+        assert!(!WorkspacePlan::load(&root)
+            .unwrap()
+            .unwrap()
+            .is_implementation_allowed());
+        let finish = serde_json::json!({"action":"complete", "session_id":id, "token":review["token"], "approve":true});
+        let response = send_custom(conn.cx(), "_goose/esi/plan-review", finish.clone())
+            .await
+            .unwrap();
+        assert_eq!(response["approved"], true);
+        assert_eq!(response["hash"], plan.content_hash());
+        assert!(WorkspacePlan::load(&root)
+            .unwrap()
+            .unwrap()
+            .is_implementation_allowed());
+        assert!(send_custom(conn.cx(), "_goose/esi/plan-review", finish)
+            .await
+            .is_err());
+        let tools = send_custom(
+            conn.cx(),
+            "_goose/unstable/tools/list",
+            serde_json::json!({"sessionId":id}),
+        )
+        .await
+        .unwrap();
+        assert!(!tools.to_string().contains("plan-review"));
+    });
+}
+
+#[test]
+#[serial]
 fn wiki_session_renewal_is_private_config_request_without_token_response() {
     write_acp_global_config(DEFAULT_ACP_TEST_CONFIG);
     run_test(async move {

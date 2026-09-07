@@ -189,6 +189,13 @@ pub struct WorkspacePlanView {
     pub approval: Option<WorkspacePlanApprovalView>,
     pub implementation_allowed: bool,
     pub revision_count: u32,
+    pub content_hash: Option<String>,
+    pub storage_revision: u64,
+    pub architecture_notes: Option<String>,
+    pub task_execution_order: Vec<String>,
+    pub task_contracts: std::collections::BTreeMap<String, esi_workspace_plan::TaskContract>,
+    pub revision_diff: Option<esi_workspace_plan::PlanRevisionDiff>,
+    pub approval_history: Vec<WorkspacePlanApprovalView>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -429,6 +436,13 @@ impl WorkspacePlanView {
             approval: None,
             implementation_allowed: false,
             revision_count: 0,
+            content_hash: None,
+            storage_revision: 0,
+            architecture_notes: None,
+            task_execution_order: Vec::new(),
+            task_contracts: Default::default(),
+            revision_diff: None,
+            approval_history: Vec::new(),
         }
     }
 
@@ -481,6 +495,20 @@ impl WorkspacePlanView {
             }),
             implementation_allowed: plan.is_implementation_allowed(),
             revision_count: plan.revision_count(),
+            content_hash: Some(plan.content_hash()),
+            storage_revision: plan.storage_revision(),
+            architecture_notes: Some(plan.architecture_notes().to_string()),
+            task_execution_order: plan.task_execution_order().expect("validated plan"),
+            task_contracts: plan.task_contracts().clone(),
+            revision_diff: Some(plan.revision_diff()),
+            approval_history: plan
+                .approval_history()
+                .iter()
+                .map(|revision| WorkspacePlanApprovalView {
+                    approved_by: revision.approval.approved_by.clone(),
+                    approved_at: revision.approval.approved_at.clone(),
+                })
+                .collect(),
         }
     }
 }

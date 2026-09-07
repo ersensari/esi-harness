@@ -52,6 +52,111 @@ fn platform(name: &str) -> ExtensionConfig {
     }
 }
 
+#[tokio::test]
+async fn native_plan_review_exact_snapshot_cancel_replay_cross_session_and_expiry() {
+    let fixture = Fixture::new().await;
+    fixture.draft();
+    let plan = WorkspacePlan::load(fixture.root.path()).unwrap().unwrap();
+    let prepare = json!({"action":"prepare", "session_id":fixture.ctx.session_id,
+        "hash":plan.content_hash(), "storage_revision":plan.storage_revision()});
+    let mut wrong = prepare.clone();
+    wrong["hash"] = json!("wrong");
+    assert!(native_plan_review(&fixture.sessions, wrong).await.is_err());
+    let review = native_plan_review(&fixture.sessions, prepare.clone())
+        .await
+        .unwrap();
+    assert_eq!(review["scope"]["hash"], plan.content_hash());
+    assert!(require_receipt(fixture.root.path()).is_err());
+    let complete = json!({"action":"complete", "session_id":fixture.ctx.session_id,
+        "token": review["token"], "approve":true});
+    let other = fixture
+        .sessions
+        .create_session(
+            fixture.root.path().into(),
+            "other".into(),
+            SessionType::User,
+            GooseMode::Auto,
+        )
+        .await
+        .unwrap();
+    let mut cross = complete.clone();
+    cross["session_id"] = json!(other.id);
+    assert!(native_plan_review(&fixture.sessions, cross).await.is_err());
+    let mut cancel = complete.clone();
+    cancel["approve"] = json!(false);
+    assert_eq!(
+        native_plan_review(&fixture.sessions, cancel).await.unwrap()["approved"],
+        false
+    );
+    assert!(native_plan_review(&fixture.sessions, complete)
+        .await
+        .is_err());
+    let expired = native_plan_review(&fixture.sessions, prepare.clone())
+        .await
+        .unwrap();
+    super::plan_review::expire_for_test(expired["token"].as_str().unwrap()).await;
+    assert!(native_plan_review(
+        &fixture.sessions,
+        json!({"action":"complete", "session_id":fixture.ctx.session_id,
+        "token":expired["token"], "approve":true})
+    )
+    .await
+    .is_err());
+    let final_review = native_plan_review(&fixture.sessions, prepare)
+        .await
+        .unwrap();
+    let finish = json!({"action":"complete", "session_id":fixture.ctx.session_id, "token":final_review["token"], "approve":true});
+    assert_eq!(
+        native_plan_review(&fixture.sessions, finish.clone())
+            .await
+            .unwrap()["approved"],
+        true
+    );
+    assert_eq!(
+        require_receipt(fixture.root.path()).unwrap().content_hash(),
+        plan.content_hash()
+    );
+    assert!(native_plan_review(&fixture.sessions, finish).await.is_err());
+}
+
+#[tokio::test]
+async fn native_plan_review_stale_snapshot_cannot_approve_newer_content_or_mint_receipt() {
+    let fixture = Fixture::new().await;
+    fixture.draft();
+    let mut plan = WorkspacePlan::load(fixture.root.path()).unwrap().unwrap();
+    let review = native_plan_review(
+        &fixture.sessions,
+        json!({"action":"prepare", "session_id":fixture.ctx.session_id,
+        "hash":plan.content_hash(), "storage_revision":plan.storage_revision()}),
+    )
+    .await
+    .unwrap();
+    plan.set_plan_content(
+        "Newer scope",
+        plan.architecture_notes().to_string(),
+        plan.tasks().to_vec(),
+    )
+    .unwrap();
+    plan.save(fixture.root.path()).unwrap();
+    let bytes = std::fs::read(WorkspacePlan::plan_path(fixture.root.path())).unwrap();
+    assert!(native_plan_review(
+        &fixture.sessions,
+        json!({"action":"complete", "session_id":fixture.ctx.session_id,
+        "token":review["token"], "approve":true})
+    )
+    .await
+    .is_err());
+    assert_eq!(
+        bytes,
+        std::fs::read(WorkspacePlan::plan_path(fixture.root.path())).unwrap()
+    );
+    assert!(require_receipt(fixture.root.path()).is_err());
+    assert!(fixture
+        .call("workspaceplan__native_plan_review", json!({"approve":true}))
+        .await
+        .is_err());
+}
+
 impl Fixture {
     async fn new() -> Self {
         // Config's singleton remains isolated by the repository test launcher.

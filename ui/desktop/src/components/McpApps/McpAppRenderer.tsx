@@ -36,6 +36,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import { callMcpAppTool, readMcpAppResource } from '../../acp/mcp-apps';
 import { httpBaseFromAcpWebSocketUrl, isLoopbackAcpWebSocketUrl } from '../../acp/url';
 import { getCachedTools } from './toolsCache';
+import PlanReview from './PlanReview';
 import { AppEvents } from '../../constants/events';
 import { useTheme } from '../../contexts/ThemeContext';
 import { cn } from '../../utils';
@@ -561,6 +562,15 @@ export default function McpAppRenderer({
   onDisplayModeChange,
 }: McpAppRendererProps) {
   const intl = useIntl();
+  const [canvasSnapshot, setCanvasSnapshot] = useState<{
+    source: CallToolResult | undefined;
+    session: string;
+    value: CallToolResult;
+  }>();
+  const displayedResult =
+    canvasSnapshot && canvasSnapshot.source === toolResult && canvasSnapshot.session === sessionId
+      ? canvasSnapshot.value
+      : toolResult;
   const containerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
@@ -1012,7 +1022,7 @@ export default function McpAppRenderer({
         hostContext={hostContext}
         toolInput={toolInput?.arguments}
         toolInputPartial={toolInputPartial?.arguments}
-        toolResult={toolResult}
+        toolResult={displayedResult}
         toolCancelled={!!toolCancelled}
         onMessage={handleMessage}
         onOpenLink={handleOpenLink}
@@ -1206,6 +1216,24 @@ export default function McpAppRenderer({
         )}
         <div ref={contentRef} className={cn('relative w-full', !isPip && 'flex-1 min-h-0')}>
           {!isPip && renderDisplayModeControls()}
+          {resourceUri === 'ui://esi-development/run' && sessionId && (
+            <PlanReview
+              key={`${sessionId}:${JSON.stringify(displayedResult?.structuredContent?.workspace_plan)}`}
+              sessionId={sessionId}
+              plan={displayedResult?.structuredContent?.workspace_plan}
+              onRefresh={async () => {
+                const value = await callMcpAppTool(
+                  sessionId,
+                  extensionName,
+                  'show_development_loop',
+                  toolInput?.arguments
+                );
+                if (value.isError || !value.structuredContent?.workspace_plan)
+                  throw new Error('Snapshot unavailable');
+                setCanvasSnapshot({ source: toolResult, session: sessionId, value });
+              }}
+            />
+          )}
           {renderContent()}
         </div>
       </div>

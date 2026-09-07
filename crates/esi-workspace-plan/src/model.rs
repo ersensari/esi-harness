@@ -176,7 +176,7 @@ pub struct ApprovedPlanRevision {
     pub content: Option<PlanContentSnapshot>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RevisionBaseline {
     Available,
@@ -184,14 +184,14 @@ pub enum RevisionBaseline {
     Unavailable,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PlanChange {
     pub path: String,
     pub before: Option<serde_json::Value>,
     pub after: Option<serde_json::Value>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PlanRevisionDiff {
     pub baseline: RevisionBaseline,
     pub approved_hash: Option<String>,

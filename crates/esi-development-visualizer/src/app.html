@@ -20,6 +20,7 @@
     <section class="wide"><h2>Workspace explorer <span id="tree-count" class="count">0 files</span></h2><div class="workspace-shell"><aside class="tree-pane"><div id="tree-meta" class="tree-meta">No workspace loaded.</div><div id="file-tree" aria-label="File tree"></div></aside><div class="viewer"><div class="viewer-head"><span id="selected-path">Select a file</span><button id="content-tab" class="tab active">File content</button><button id="diff-tab" class="tab">Diff</button></div><pre id="file-viewer">Select a file from the tree.</pre></div></div></section>
     <section class="wide"><h2>Workspace canvas <span class="count">read-only</span></h2><canvas id="workspace-canvas"></canvas><p class="canvas-note">Live structure and controller stages. The canvas cannot edit files or advance workflow state.</p></section>
     <section class="wide"><h2>Workspace plan <span id="workspace-plan-status" class="count">missing</span></h2><div id="workspace-plan" class="empty">No workspace plan loaded.</div></section>
+    <section class="wide" aria-label="Plan revision details"><h2>Plan scope and revisions</h2><div id="plan-details" aria-live="polite">No plan loaded.</div><p class="canvas-note">Read-only snapshot. Use the native Desktop review control outside this app to approve this exact revision. Task progress is not validation evidence.</p></section>
     <section><h2>Worktree</h2><div id="worktree" class="empty">No worktree bound.</div></section>
     <section><h2>Repair budgets <span id="repair-count" class="count">0</span></h2><ul id="repair-budgets"></ul></section>
     <section class="wide"><h2>Changed files <span id="file-count" class="count">0</span></h2><ul id="changed-files" class="files"></ul></section>
@@ -38,6 +39,34 @@
   const post=(method,params,id)=>window.parent.postMessage(method===undefined?{jsonrpc:"2.0",id,result:params}:{jsonrpc:"2.0",...(id?{id}:{}),method,params},"*");
   const callTool=(name,args)=>{const id=++requestId;return new Promise((resolve,reject)=>{pending.set(id,{resolve,reject});post("tools/call",{name,arguments:args},id)})};
   const structured=result=>result?.structuredContent||result?.structured_content||null;
+  function renderPlanDetails(plan){
+    const panel=byId("plan-details");panel.replaceChildren();
+    if(!plan?.exists){panel.append(text("p",plan?.message||"No plan loaded."));return}
+    panel.append(text("div",`Hash: ${plan.content_hash||"unavailable"}\nStorage revision: ${plan.storage_revision??"unavailable"}`,"detail"));
+    panel.append(text("h3","Architecture"),text("div",plan.architecture_notes||"Not specified","detail"));
+    panel.append(text("h3","Task execution order"),text("div",(plan.task_execution_order||[]).join(" → ")||"No tasks","detail"));
+    const contracts=plan.task_contracts||{},tasks=new Map((plan.tasks||[]).map(t=>[t.id,t]));
+    for(const id of plan.task_execution_order||[]){
+      const contract=contracts[id]||{},task=tasks.get(id),details=document.createElement("details");
+      details.append(text("summary",`${id} · ${task?.title||id}`));
+      details.append(text("div",`Dependencies: ${(contract.depends_on||[]).join(", ")||"none"}\nComponents: ${(contract.affected_components||[]).join(", ")||"not specified"}`,"detail"));
+      for(const c of contract.acceptance_criteria||[])details.append(text("div",`${c.id}: ${c.description}${c.requirement_id?` [${c.requirement_id}]`:""}`,"detail"));
+      for(const v of contract.validation_expectations||[])details.append(text("div",`Expected validation ${v.id}: ${v.description} [${(v.criterion_ids||[]).join(", ")}]`,"detail"));
+      panel.append(details);
+    }
+    const diff=plan.revision_diff;panel.append(text("h3","Changes since approval"));
+    if(!diff||diff.baseline==="unavailable")panel.append(text("p","Previous approved content is unavailable; an empty diff does not mean unchanged scope."));
+    else if(diff.baseline==="no_approval")panel.append(text("p","No approved baseline exists yet."));
+    else {
+      panel.append(text("div",`Approved hash: ${diff.approved_hash}`,"detail"));
+      if(!diff.changes?.length)panel.append(text("p","No semantic changes since approval."));
+      for(const change of diff.changes||[]){const details=document.createElement("details");details.append(text("summary",change.path),text("div",`Before: ${JSON.stringify(change.before)}\nAfter: ${JSON.stringify(change.after)}`,"detail"));panel.append(details)}
+    }
+    panel.append(text("div",`Affected tasks: ${(diff?.affected_task_ids||[]).join(", ")||"none"}`,"detail"));
+    const history=document.createElement("details");history.append(text("summary",`Approval history (${plan.approval_history?.length||0})`));
+    for(const entry of plan.approval_history||[])history.append(text("div",`${entry.approved_by} · ${entry.approved_at}`,"detail"));panel.append(history);
+  }
+  window.addEventListener("message",event=>{if(event.source!==window.parent)return;const message=event.data;if(message?.jsonrpc==="2.0"&&message.method==="ui/notifications/tool-result")renderPlanDetails(message.params?.structuredContent?.workspace_plan)});
   async function loadSelected(){if(!selected||!data?.workspace?.root)return;const viewer=byId("file-viewer"),key=`${activeTab}:${selected}`;if(cache.has(key)){viewer.textContent=cache.get(key);return}viewer.textContent=`Loading ${activeTab}…`;try{const result=activeTab==="content"?await callTool("read_workspace_file",{workspace_path:data.workspace.root,path:selected}):await callTool("read_workspace_diff",{workspace_path:data.workspace.root,path:selected}),value=structured(result),output=activeTab==="content"?value?.content:value?.diff,rendered=output||(activeTab==="diff"?"No Git diff for this file.":"File is empty.");cache.set(key,rendered+(value?.truncated?"\n\n… output truncated …":""));viewer.textContent=cache.get(key)}catch(error){viewer.textContent=`Unable to load ${selected}: ${error?.message||error}`}}
   function selectFile(path,button){selected=path;byId("selected-path").textContent=path;document.querySelectorAll(".tree-entry.active").forEach(n=>n.classList.remove("active"));button.classList.add("active");loadSelected()}
   function renderTree(workspace){const tree=byId("file-tree");tree.replaceChildren();if(!workspace){tree.append(text("div","No workspace loaded.","empty"));return}byId("tree-meta").textContent=[workspace.root,workspace.branch||"no branch",workspace.head||"no commit"].join(" · ");const entries=workspace.files||[];byId("tree-count").textContent=`${entries.filter(e=>e.kind==="file").length} files${workspace.tree_truncated?" +":""}`;entries.forEach(entry=>{const depth=entry.path.split("/").length-1,isFile=entry.kind==="file",node=text(isFile?"button":"div",`${isFile?"·":entry.kind==="directory"?"▾":"↗"} ${entry.path.split("/").pop()}`,`tree-entry${entry.changed?" changed":""}`);node.style.paddingLeft=`${7+depth*13}px`;node.title=entry.path;if(isFile){node.type="button";node.addEventListener("click",()=>selectFile(entry.path,node))}tree.append(node)})}

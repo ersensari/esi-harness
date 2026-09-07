@@ -9,6 +9,15 @@ impl GooseAcpAgent {
         params: serde_json::Value,
     ) -> Result<serde_json::Value, agent_client_protocol::Error> {
         let result = async {
+            if method == "_goose/esi/plan-review" {
+                self.config()?;
+                return crate::workspace_tool_authority::native_plan_review(
+                    &self.session_manager,
+                    params,
+                )
+                .await
+                .invalid_params_err_ctx("Cannot review workspace plan");
+            }
             if method == "_goose/esi/extension-trust" {
                 #[derive(serde::Deserialize)]
                 #[serde(rename_all = "camelCase", deny_unknown_fields)]
