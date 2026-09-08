@@ -56,11 +56,17 @@ export default function PlanReview({
   return (
     <section aria-label="Desktop plan approval" className="border border-border-primary p-3">
       <p className="text-sm">Desktop approval · Canvas remains read-only</p>
-      <button type="button" disabled={busy} onClick={() => void prepare()}>
+      <button
+        className="mr-2 mt-2 rounded border border-border-primary px-3 py-1"
+        type="button"
+        disabled={busy}
+        onClick={() => void prepare()}
+      >
         Review this plan revision
       </button>
       {onRefresh && (
         <button
+          className="mr-2 mt-2 rounded border border-border-primary px-3 py-1"
           type="button"
           disabled={busy}
           onClick={async () => {
@@ -94,7 +100,13 @@ export default function PlanReview({
                 message: `Approve implementation of this exact workspace plan?\n${JSON.stringify(review.scope, null, 2)}`,
                 requested_schema: {
                   type: 'object',
-                  properties: { approve: { type: 'boolean', title: 'Approve this plan' } },
+                  properties: {
+                    approve: {
+                      type: 'boolean',
+                      title: 'Approve this plan',
+                      description: 'Approve this plan',
+                    },
+                  },
                   required: ['approve'],
                   additionalProperties: false,
                 },
@@ -127,6 +139,7 @@ export default function PlanReview({
             }}
           />
           <button
+            className="mr-2 mt-2 rounded border border-border-primary px-3 py-1"
             type="button"
             disabled={busy}
             onClick={() => {

@@ -34,7 +34,7 @@ describe('native Canvas plan review', () => {
       hash: plan.content_hash,
       storage_revision: 7,
     });
-    const checkbox = screen.getByRole('checkbox');
+    const checkbox = screen.getByRole('checkbox', { name: 'Approve this plan' });
     checkbox.focus();
     await user.keyboard(' ');
     await user.tab();

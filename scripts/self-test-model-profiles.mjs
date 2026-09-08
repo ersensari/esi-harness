@@ -19,6 +19,7 @@ const phaseTitles = {
   'plan-task-contract': 'ESI Plan Task Contract',
   'planning-templates': 'ESI Planning Templates',
   'plan-revision': 'ESI Plan Revision',
+  'planning-release': 'ESI Planning Release',
 };
 assert(Object.hasOwn(phaseTitles, phase));
 const phaseTitle = phaseTitles[phase];
@@ -27,7 +28,11 @@ const root = await mkdtemp(join(tmpdir(), 'forgeloop-ai-profile-selftest-'));
 const artifacts = join(root, 'artifacts');
 await mkdir(artifacts);
 await mkdir(join(root, 'config/custom_providers'), { recursive: true });
-const commands = phase === 'plan-revision' ? [
+const commands = phase === 'planning-release' ? [
+  'node scripts/test-isolated.mjs cargo test --locked -p esi-workspace-plan -p esi-development-visualizer -- --quiet',
+  'node scripts/test-isolated.mjs cargo test --locked -p goose --lib native_plan_review -- --quiet',
+  'node scripts/test-isolated.mjs cargo test --locked -p goose --test acp_custom_requests_test native_plan_review -- --quiet',
+] : phase === 'plan-revision' ? [
   'node scripts/test-isolated.mjs cargo test --locked -p esi-workspace-plan --test revision -- --quiet',
   'node scripts/test-isolated.mjs cargo test --locked -p goose --lib workspace_plan -- --quiet',
   'node scripts/test-isolated.mjs cargo test --locked -p goose --lib authority_forged -- --quiet',

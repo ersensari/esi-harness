@@ -13,6 +13,7 @@ const { chromium } = require('playwright');
 const [executable, reportPath, loop = 'legacy', mode = 'manual'] = process.argv.slice(2);
 const discovery = mode === 'discovery';
 const trust = mode === 'trust';
+const planning = mode === 'planning';
 const restricted = mode === 'restricted-discovery';
 assert(executable?.startsWith('/') && reportPath?.startsWith('/'));
 const root = await mkdtemp(join(tmpdir(), 'forgeloop-ai-model-profiles-'));
@@ -61,6 +62,13 @@ const server = createServer(async (req, res) => {
         : { content: 'POST147 trusted loop execution' }),
     } }];
   }
+  if (planning && body.messages.at(-1)?.role === 'user' && JSON.stringify(body.messages.at(-1)).includes('M17005 show plan')) {
+    message.content = null;
+    message.tool_calls = [{ id: 'plan-canvas-call', type: 'function', function: {
+      name: 'esi-development-visualizer__show_development_loop',
+      arguments: JSON.stringify({ workspace_path: workspace }),
+    } }];
+  }
   res.setHeader('content-type', 'application/json');
   res.end(JSON.stringify({ id: 'fixture-completion', object: 'chat.completion', created: 1, model: 'manual',
     choices: [{ index: 0, message, finish_reason: message.tool_calls ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 20, completion_tokens: 5, total_tokens: 25 } }));
@@ -73,8 +81,12 @@ await writeFile(join(gooseRoot, 'config/custom_providers/custom_profile_fixture.
 }));
 await writeFile(join(gooseRoot, 'config/config.yaml'), JSON.stringify({
   GOOSE_PROVIDER: 'custom_profile_fixture', GOOSE_MODEL: 'manual', GOOSE_DISABLE_KEYRING: true,
-  GOOSE_TELEMETRY_ENABLED: false, GOOSE_MODE: trust ? 'auto' : 'chat',
-  extensions: trust ? { todo: { type: 'platform', name: 'todo', enabled: true, description: '' },
+  GOOSE_TELEMETRY_ENABLED: false, GOOSE_MODE: trust || planning ? 'auto' : 'chat',
+  extensions: planning ? {
+    developer: { type: 'platform', name: 'developer', enabled: true },
+    workspaceplan: { type: 'platform', name: 'workspaceplan', enabled: true },
+    'esi-development-visualizer': { type: 'builtin', name: 'esi-development-visualizer', enabled: true },
+  } : trust ? { todo: { type: 'platform', name: 'todo', enabled: true, description: '' },
     developer: { type: 'platform', name: 'developer', enabled: true, description: '' } } : {},
   ...(restricted ? { 'ESI_MODEL_PROFILE:["custom_profile_fixture","manual"]': {
     context_limit: null, max_tokens: null, thinking_protocol: 'reasoning_effort', thinking_effort: 'low',
@@ -97,7 +109,7 @@ async function close() {
 }
 async function launch() {
   await rm(join(profile, 'DevToolsActivePort'), { force: true });
-  app = spawn(executable, ['--ozone-platform=x11', `--user-data-dir=${profile}`], { env, cwd: workspace, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  app = spawn(executable, ['--ozone-platform=x11', '--dir', workspace, `--user-data-dir=${profile}`], { env, cwd: workspace, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
   let log = '';
   for (const stream of [app.stdout, app.stderr]) stream.on('data', chunk => { log = (log + chunk).slice(-4000); });
   await until(async () => {
@@ -139,7 +151,10 @@ async function send(page, text) {
 }
 try {
   let page = await launch();
-  if (restricted) {
+  if (planning) {
+    const { acceptPlanning } = await import('./planning-acceptance.mjs');
+    await acceptPlanning({ page, rpc, workspace, root, pass, until });
+  } else if (restricted) {
     await page.getByRole('button', { name: 'Model settings', exact: true }).click();
     await page.getByText(/Effective context: 262,144/).waitFor();
     assert.equal(await page.getByLabel('Context limit (tokens)', { exact: true }).inputValue(), '');
