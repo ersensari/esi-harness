@@ -355,6 +355,49 @@ fn lifecycle_git_inspection_does_not_execute_repository_fsmonitor() {
     assert!(!marker.exists());
 }
 
+#[cfg(unix)]
+#[test]
+fn lifecycle_disables_local_checkout_filters() {
+    use std::os::unix::fs::PermissionsExt;
+    let fixture = Fixture::new();
+    std::fs::write(
+        fixture.repository.join(".gitattributes"),
+        "README.md filter=fixture\n",
+    )
+    .unwrap();
+    git(&fixture.repository, ["add", ".gitattributes"]);
+    git(&fixture.repository, ["commit", "-m", "attributes"]);
+    let marker = fixture._root.path().join("filter-ran");
+    let filter = fixture._root.path().join("filter.sh");
+    std::fs::write(
+        &filter,
+        format!("#!/bin/sh\ntouch '{}'\ncat\n", marker.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&filter, std::fs::Permissions::from_mode(0o755)).unwrap();
+    git(
+        &fixture.repository,
+        ["config", "filter.fixture.smudge", filter.to_str().unwrap()],
+    );
+    git(
+        &fixture.repository,
+        ["config", "filter.fixture.clean", filter.to_str().unwrap()],
+    );
+    git(
+        &fixture.repository,
+        ["config", "filter.fixture.required", "true"],
+    );
+    fixture
+        .manager
+        .create(
+            &fixture.repository,
+            SessionId::new("no-filters").unwrap(),
+            "HEAD",
+        )
+        .unwrap();
+    assert!(!marker.exists());
+}
+
 #[test]
 fn promotion_preparation_reports_committed_candidate_without_promoting() {
     let fixture = Fixture::new();

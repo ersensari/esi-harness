@@ -179,6 +179,7 @@ pub enum ValidationTermination {
 
 #[derive(Clone, Debug)]
 pub struct ValidationControl {
+    pub(crate) contained: bool,
     pub timeout: std::time::Duration,
     pub output_limit_bytes: usize,
     cancelled: std::sync::Arc<std::sync::atomic::AtomicBool>,
@@ -187,6 +188,7 @@ pub struct ValidationControl {
 impl Default for ValidationControl {
     fn default() -> Self {
         Self {
+            contained: false,
             timeout: std::time::Duration::from_secs(300),
             output_limit_bytes: 16 * 1024,
             cancelled: Default::default(),
@@ -386,6 +388,8 @@ pub struct DevelopmentState {
 
 #[derive(Debug, Error)]
 pub enum DevelopmentError {
+    #[error(transparent)]
+    Workspace(#[from] esi_workspace::WorkspaceError),
     #[error(transparent)]
     Persistence(#[from] esi_workspace_plan::storage::PersistenceError),
     #[error("invalid development transition from {from:?} to {to:?}")]

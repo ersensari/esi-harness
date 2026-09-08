@@ -257,9 +257,8 @@ mod tests {
         F: FnOnce(),
     {
         let root = TempDir::new().unwrap();
-        std::env::set_var("GOOSE_PATH_ROOT", root.path());
+        let _env = env_lock::lock_env([("GOOSE_PATH_ROOT", root.path().to_str())]);
         test();
-        std::env::remove_var("GOOSE_PATH_ROOT");
     }
 
     #[test]

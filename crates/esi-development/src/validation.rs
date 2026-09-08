@@ -145,8 +145,66 @@ mod linux {
         control: &ValidationControl,
     ) -> io::Result<ProcessResult> {
         let start = Instant::now();
-        let mut child = OwnedChild(
+        let mut process = if control.contained {
+            let mut process = Command::new("/usr/bin/bwrap");
+            process.env_clear().args([
+                "--unshare-all",
+                "--die-with-parent",
+                "--new-session",
+                "--ro-bind",
+                "/usr",
+                "/usr",
+                "--symlink",
+                "usr/bin",
+                "/bin",
+                "--symlink",
+                "usr/lib",
+                "/lib",
+                "--symlink",
+                "usr/lib64",
+                "/lib64",
+                "--proc",
+                "/proc",
+                "--dev",
+                "/dev",
+                "--tmpfs",
+                "/tmp",
+                "--dir",
+                "/tmp/home",
+                "--setenv",
+                "HOME",
+                "/tmp/home",
+                "--setenv",
+                "PATH",
+                "/usr/bin:/bin",
+                "--setenv",
+                "LANG",
+                "C.UTF-8",
+            ]);
+            process.arg("--bind").arg(directory).arg(directory);
+            for name in [".git", ".esi"] {
+                let path = directory.join(name);
+                if path.try_exists()? {
+                    if std::fs::symlink_metadata(&path)?.file_type().is_symlink() {
+                        return Err(io::Error::new(
+                            io::ErrorKind::PermissionDenied,
+                            "control path is a symlink",
+                        ));
+                    }
+                    process.arg("--ro-bind").arg(&path).arg(&path);
+                }
+            }
+            process
+                .arg("--chdir")
+                .arg(directory)
+                .arg("--")
+                .arg(&command.program);
+            process
+        } else {
             Command::new(&command.program)
+        };
+        let mut child = OwnedChild(
+            process
                 .args(&command.arguments)
                 .current_dir(directory)
                 .stdin(Stdio::null())

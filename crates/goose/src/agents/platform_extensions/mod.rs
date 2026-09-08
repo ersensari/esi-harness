@@ -4,6 +4,7 @@ pub mod chatrecall;
 #[cfg(feature = "code-mode")]
 pub mod code_execution;
 pub mod context_management;
+pub mod controller;
 pub mod developer;
 pub mod ext_manager;
 pub mod orchestrator;
@@ -213,6 +214,22 @@ pub static PLATFORM_EXTENSIONS: Lazy<HashMap<&'static str, PlatformExtensionDef>
                     Some(Box::new(
                         workspace_plan::WorkspacePlanClient::new(ctx).unwrap(),
                     ))
+                },
+            },
+        );
+
+        map.insert(
+            controller::EXTENSION_NAME,
+            PlatformExtensionDef {
+                name: controller::EXTENSION_NAME,
+                display_name: "ESI Controller",
+                description:
+                    "Start, inspect, validate and resume approved tasks in owned worktrees",
+                default_enabled: false,
+                unprefixed_tools: false,
+                hidden: false,
+                client_factory: |ctx| {
+                    Some(Box::new(controller::ControllerClient::new(ctx).unwrap()))
                 },
             },
         );

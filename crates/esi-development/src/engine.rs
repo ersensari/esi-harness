@@ -241,6 +241,17 @@ impl DevelopmentState {
         inspection: &WorktreeInspection,
         control: &ValidationControl,
     ) -> Result<ValidationRun, DevelopmentError> {
+        self.validate_with_inspector(inspection, control, || Ok(inspection.clone()))
+    }
+
+    /// Host services provide a fresh inspection after all spawned commands exit.
+    /// Failed inspection or changed content invalidates even zero-exit validators.
+    pub fn validate_with_inspector(
+        &mut self,
+        inspection: &WorktreeInspection,
+        control: &ValidationControl,
+        inspect_after: impl FnOnce() -> Result<WorktreeInspection, DevelopmentError>,
+    ) -> Result<ValidationRun, DevelopmentError> {
         if control.timeout.is_zero()
             || control.output_limit_bytes == 0
             || control.output_limit_bytes > 16 * 1024 * 1024
@@ -280,6 +291,41 @@ impl DevelopmentState {
             if required_failure.is_some() {
                 break;
             }
+        }
+        let snapshot_error = match inspect_after() {
+            Ok(after) => {
+                if self.verify_bound_worktree(&after).is_err()
+                    || after.snapshot_id != inspection.snapshot_id
+                {
+                    Some("Worktree snapshot changed during validation".to_string())
+                } else {
+                    None
+                }
+            }
+            Err(error) => Some(format!("Post-validation inspection failed: {error}")),
+        };
+        if let Some(message) = snapshot_error {
+            let item = ValidationEvidence {
+                validator_id: "esi-post-validation-snapshot".into(),
+                category: ValidationCategory::Scope,
+                command: Vec::new(),
+                required: true,
+                outcome: ValidationOutcome::Failed,
+                exit_code: None,
+                stdout: String::new(),
+                stderr: bounded(&message),
+                failure_fingerprint: Some(fingerprint(
+                    FailureCategory::Scope,
+                    "esi-post-validation-snapshot",
+                    &message,
+                    &inspection.record.identity.worktree_path,
+                )),
+                termination: Some(ValidationTermination::ProcessError),
+                stdout_truncated: false,
+                stderr_truncated: message.len() > MAX_EVIDENCE_BYTES,
+            };
+            required_failure = Some(failure_from_evidence(&item));
+            evidence.push(item);
         }
         let run = ValidationRun {
             attempt: self.validation_runs.len() as u32 + 1,

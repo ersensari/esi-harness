@@ -4282,6 +4282,7 @@ version = "1.48.0"
 dependencies = [
  "esi-workspace",
  "esi-workspace-plan",
+ "fs2",
  "nix",
  "serde",
  "serde_json",
@@ -5277,6 +5278,8 @@ dependencies = [
  "dotenvy",
  "dtor",
  "env-lock",
+ "esi-development",
+ "esi-workspace",
  "esi-workspace-plan",
  "etcetera",
  "fs-err",

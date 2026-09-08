@@ -395,6 +395,14 @@ pub struct SessionNameUpdate {
 }
 
 impl SessionManager {
+    pub(crate) fn controller_data_dir(&self) -> PathBuf {
+        self.storage
+            .session_dir
+            .parent()
+            .expect("session directory has a data root")
+            .join("esi-controller")
+    }
+
     pub fn new(data_dir: PathBuf) -> Self {
         Self {
             storage: Arc::new(SessionStorage::new(data_dir)),

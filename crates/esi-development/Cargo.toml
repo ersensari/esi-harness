@@ -9,6 +9,7 @@ description = "Local deterministic software-development workflow for ESI-Studio"
 [dependencies]
 esi-workspace = { path = "../esi-workspace" }
 esi-workspace-plan = { path = "../esi-workspace-plan" }
+fs2.workspace = true
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2 = { workspace = true }

@@ -54,6 +54,15 @@ parameters:
     description: "Clean up test artifacts after completion"
 
 instructions: |
+  {% if test_phases == "all" or "controller-tools" in test_phases %}
+  ### ESI Controller Tools
+  Run `node scripts/test-isolated.mjs cargo test --locked -p esi-development --test service`.
+  Run `node scripts/test-isolated.mjs cargo test --locked -p goose --lib controller_factory`.
+  Run `node scripts/test-isolated.mjs cargo test --locked -p esi-workspace`.
+  Record real command results. A library/adapter PASS does not prove direct tool
+  session binding or installed both-loop delivery; those require M18-003/005.
+  {% endif %}
+
   You are testing yourself - a running goose instance validating its own capabilities through meta-testing.
   This is true first-person integration testing where you use your own tools to test your own functionality.
 

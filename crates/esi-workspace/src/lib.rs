@@ -3,7 +3,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Seek, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 use thiserror::Error;
@@ -465,6 +465,7 @@ impl WorkspaceManager {
         if record.state == LifecycleState::Cleaned {
             return Err(WorkspaceError::OwnershipMismatch);
         }
+        check_inspection_tree(&record.identity.worktree_path)?;
         let relationship = RepositoryRelationship::inspect(&record.identity.worktree_path)?;
         self.verify_relationship(&relationship, &record)?;
         if paths_equal(
@@ -495,6 +496,8 @@ impl WorkspaceManager {
             [
                 "diff",
                 "--name-only",
+                "--no-ext-diff",
+                "--no-textconv",
                 &format!("{}..HEAD", record.identity.base_commit),
             ],
         )?
@@ -504,7 +507,13 @@ impl WorkspaceManager {
         .collect::<BTreeSet<_>>();
         changed_files.extend(git_lines(
             &record.identity.worktree_path,
-            ["diff", "--name-only", "HEAD"],
+            [
+                "diff",
+                "--name-only",
+                "--no-ext-diff",
+                "--no-textconv",
+                "HEAD",
+            ],
         )?);
         changed_files.extend(git_lines(
             &record.identity.worktree_path,
@@ -607,7 +616,10 @@ where
 }
 
 fn worktree_snapshot_id(worktree: &Path, head: &str, status: &[u8]) -> Result<String> {
-    let diff = git(worktree, ["diff", "--binary", "--no-ext-diff", "HEAD"])?;
+    let diff = git(
+        worktree,
+        ["diff", "--binary", "--no-ext-diff", "--no-textconv", "HEAD"],
+    )?;
     let untracked = git(
         worktree,
         ["ls-files", "--others", "--exclude-standard", "-z"],
@@ -637,8 +649,10 @@ fn worktree_snapshot_id(worktree: &Path, head: &str, status: &[u8]) -> Result<St
         let metadata = fs::symlink_metadata(&absolute_path)?;
         if metadata.file_type().is_symlink() {
             hasher.update(fs::read_link(absolute_path)?.as_os_str().as_encoded_bytes());
-        } else {
+        } else if metadata.is_file() && metadata.len() <= 64 * 1024 * 1024 {
             hasher.update(fs::read(absolute_path)?);
+        } else {
+            return Err(WorkspaceError::OwnershipMismatch);
         }
         hasher.update([0]);
     }
@@ -647,6 +661,40 @@ fn worktree_snapshot_id(worktree: &Path, head: &str, status: &[u8]) -> Result<St
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect())
+}
+
+fn check_inspection_tree(root: &Path) -> Result<()> {
+    let mut directories = vec![root.to_path_buf()];
+    let mut files = 0_u64;
+    let mut bytes = 0_u64;
+    while let Some(directory) = directories.pop() {
+        for entry in fs::read_dir(directory)? {
+            let entry = entry?;
+            let metadata = fs::symlink_metadata(entry.path())?;
+            files += 1;
+            if files > 250_000 {
+                return Err(WorkspaceError::OwnershipMismatch);
+            }
+            if metadata.is_dir() {
+                directories.push(entry.path());
+            } else if metadata.is_file() {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::MetadataExt;
+                    if metadata.nlink() != 1 {
+                        return Err(WorkspaceError::OwnershipMismatch);
+                    }
+                }
+                bytes = bytes.saturating_add(metadata.len());
+                if metadata.len() > 64 * 1024 * 1024 || bytes > 256 * 1024 * 1024 {
+                    return Err(WorkspaceError::OwnershipMismatch);
+                }
+            } else if !metadata.file_type().is_symlink() {
+                return Err(WorkspaceError::OwnershipMismatch);
+            }
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug)]
@@ -735,7 +783,7 @@ where
         .into_iter()
         .map(|argument| argument.as_ref().to_owned())
         .collect::<Vec<_>>();
-    let output = git_command(cwd).args(&arguments).output()?;
+    let output = bounded_git_output(cwd, &arguments)?;
     if output.status.success() {
         return Ok(true);
     }
@@ -754,7 +802,7 @@ where
         .into_iter()
         .map(|argument| argument.as_ref().to_owned())
         .collect::<Vec<_>>();
-    let output = git_command(cwd).args(&arguments).output()?;
+    let output = bounded_git_output(cwd, &arguments)?;
     if output.status.success() {
         Ok(output)
     } else {
@@ -763,19 +811,119 @@ where
 }
 
 fn git_command(cwd: &Path) -> Command {
-    let mut command = Command::new("git");
+    let mut command = Command::new("/usr/bin/git");
     command
         .current_dir(cwd)
+        .env_clear()
+        .env("PATH", "/usr/bin:/bin")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_NOSYSTEM", "1")
         .args([
             "-c",
             "core.fsmonitor=false",
             "-c",
-            "core.hooksPath=",
+            "core.hooksPath=/dev/null",
             "-c",
             "credential.helper=",
+            "-c",
+            "submodule.recurse=false",
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
         ]);
     command
+}
+
+fn bounded_git_output(cwd: &Path, arguments: &[OsString]) -> Result<Output> {
+    const LIMIT: u64 = 16 * 1024 * 1024;
+    let mut stdout = tempfile::tempfile()?;
+    let mut stderr = tempfile::tempfile()?;
+    let mut command = git_command(cwd);
+    // Named filter commands are local executable configuration, not inert Git
+    // metadata. Disable them for owned lifecycle operations and inspection.
+    let mut config = git_command(cwd);
+    config.args([
+        "config",
+        "--local",
+        "--name-only",
+        "--get-regexp",
+        "^filter\\..*\\.(clean|smudge|process|required)$",
+    ]);
+    // Read config through the same bounded primitive without recursively
+    // expanding filter configuration.
+    let config_output = capture_git(&mut config, &mut stdout, &mut stderr, LIMIT)?;
+    if config_output.status.success() {
+        for key in String::from_utf8_lossy(&config_output.stdout).lines() {
+            command.arg("-c").arg(format!(
+                "{key}={}",
+                if key.ends_with(".required") {
+                    "false"
+                } else {
+                    ""
+                }
+            ));
+        }
+    } else if config_output.status.code() != Some(1) {
+        return Err(git_error(arguments, config_output));
+    }
+    stdout.set_len(0)?;
+    stdout.rewind()?;
+    stderr.set_len(0)?;
+    stderr.rewind()?;
+    capture_git(command.args(arguments), &mut stdout, &mut stderr, LIMIT)
+}
+
+fn capture_git(
+    command: &mut Command,
+    stdout: &mut fs::File,
+    stderr: &mut fs::File,
+    limit: u64,
+) -> Result<Output> {
+    struct Child(std::process::Child);
+    impl Drop for Child {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    let mut child = Child(
+        command
+            .stdin(std::process::Stdio::null())
+            .stdout(stdout.try_clone()?)
+            .stderr(stderr.try_clone()?)
+            .spawn()?,
+    );
+    let started = std::time::Instant::now();
+    let status = loop {
+        if stdout.metadata()?.len() > limit
+            || stderr.metadata()?.len() > limit
+            || started.elapsed() > std::time::Duration::from_secs(30)
+        {
+            return Err(WorkspaceError::Git {
+                command: "bounded Git operation".into(),
+                stderr: "Git exceeded output or time budget".into(),
+            });
+        }
+        if let Some(status) = child.0.try_wait()? {
+            break status;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    stdout.rewind()?;
+    stderr.rewind()?;
+    let mut out = Vec::new();
+    let mut err = Vec::new();
+    stdout.take(limit + 1).read_to_end(&mut out)?;
+    stderr.take(limit + 1).read_to_end(&mut err)?;
+    if out.len() as u64 > limit || err.len() as u64 > limit {
+        return Err(WorkspaceError::OwnershipMismatch);
+    }
+    Ok(Output {
+        status,
+        stdout: out,
+        stderr: err,
+    })
 }
 
 fn git_error(arguments: &[OsString], output: Output) -> WorkspaceError {

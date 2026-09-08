@@ -28,6 +28,7 @@ static EXECUTION: Mutex<()> = Mutex::const_new(());
 pub(crate) enum Factory {
     Developer,
     WorkspacePlan,
+    Controller,
 }
 
 impl Factory {
@@ -35,6 +36,7 @@ impl Factory {
         match key {
             "developer" => Some(Self::Developer),
             "workspaceplan" => Some(Self::WorkspacePlan),
+            "controller" => Some(Self::Controller),
             _ => None,
         }
     }
@@ -92,7 +94,7 @@ fn load_plan(workspace: &Path) -> Result<WorkspacePlan> {
     Ok(plan)
 }
 
-async fn workspace(sessions: &SessionManager, ctx: &ToolCallContext) -> Result<PathBuf> {
+pub(crate) async fn workspace(sessions: &SessionManager, ctx: &ToolCallContext) -> Result<PathBuf> {
     let session = sessions.get_session(&ctx.session_id, false).await?;
     let root = session.working_dir.canonicalize()?;
     ensure!(
@@ -167,7 +169,9 @@ pub(crate) async fn check_permission(
         .goose_mode;
     let read_only = matches!(
         (extension, tool),
-        ("developer", "tree") | ("workspaceplan", "status" | "revision_diff")
+        ("developer", "tree")
+            | ("workspaceplan", "status" | "revision_diff")
+            | ("controller", "status")
     );
     ensure!(
         mode != GooseMode::Chat || read_only,
@@ -220,6 +224,12 @@ pub(crate) async fn execute(
         ctx.tool_call_request_id.clone(),
     );
     ctx.requires_workspace_receipt = true;
+    if matches!(factory, Factory::Controller) {
+        return client
+            .call_tool(&ctx, tool, arguments, cancellation)
+            .await
+            .map_err(Into::into);
+    }
     if matches!(factory, Factory::WorkspacePlan) && tool == "approve" {
         ensure!(
             arguments.as_ref().is_none_or(|args| args.is_empty()),
@@ -261,6 +271,7 @@ pub(crate) async fn execute(
     };
     ensure!(!cancellation.is_cancelled(), "Tool cancelled");
     match factory {
+        Factory::Controller => unreachable!("controller uses its own durable operation leases"),
         Factory::WorkspacePlan => {
             match tool {
                 "status" | "revision_diff" => {}

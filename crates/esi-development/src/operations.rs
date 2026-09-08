@@ -27,7 +27,7 @@ pub struct OperationRequest {
 }
 
 impl OperationRequest {
-    fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         !self.request_id.is_empty()
             && self.request_id.len() <= 128
             && self

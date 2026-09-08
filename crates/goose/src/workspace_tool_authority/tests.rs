@@ -19,6 +19,156 @@ struct Fixture {
 }
 
 #[tokio::test]
+async fn controller_factory_requires_human_start_and_dispatches_real_validation() {
+    let fixture = Fixture::new().await;
+    for args in [
+        vec!["init", "-b", "main"],
+        vec!["config", "user.name", "Controller test"],
+        vec!["config", "user.email", "controller@example.invalid"],
+    ] {
+        assert!(std::process::Command::new("git")
+            .current_dir(fixture.root.path())
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success());
+    }
+    std::fs::write(fixture.root.path().join("result.txt"), "original\n").unwrap();
+    for args in [vec!["add", "result.txt"], vec!["commit", "-m", "fixture"]] {
+        assert!(std::process::Command::new("git")
+            .current_dir(fixture.root.path())
+            .args(args)
+            .output()
+            .unwrap()
+            .status
+            .success());
+    }
+    fixture.draft();
+    fixture.approve(false, true).await.unwrap();
+    fixture
+        .manager
+        .add_extension(
+            platform("controller"),
+            Some(fixture.root.path().into()),
+            None,
+            Some(&fixture.ctx.session_id),
+        )
+        .await
+        .unwrap();
+    let args = json!({"task_id":"T1", "request_id":"start", "validators":[{
+        "id":"check", "category":"targeted_tests", "program":"/bin/sh",
+        "arguments":["-c","test \"$(cat result.txt)\" = original"], "required":true
+    }]});
+    let mut direct = fixture.ctx.clone();
+    direct.tool_call_request_id = None;
+    let result = fixture
+        .manager
+        .dispatch_tool_call(
+            &direct,
+            CallToolRequestParams::new("controller__start")
+                .with_arguments(args.as_object().unwrap().clone()),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap()
+        .result
+        .await
+        .unwrap();
+    assert_eq!(result.is_error, Some(true));
+    let mut forged = args.clone();
+    forged["approved_by"] = json!("desktop-user");
+    assert_eq!(
+        fixture
+            .call("controller__start", forged)
+            .await
+            .unwrap()
+            .is_error,
+        Some(true)
+    );
+
+    let mut ctx = fixture.ctx.clone();
+    ctx.tool_call_request_id = Some(uuid::Uuid::new_v4().to_string());
+    let mut pending = fixture
+        .manager
+        .dispatch_tool_call(
+            &ctx,
+            CallToolRequestParams::new("controller__start")
+                .with_arguments(args.as_object().unwrap().clone()),
+            CancellationToken::new(),
+        )
+        .await
+        .unwrap();
+    let future = tokio::spawn(pending.result);
+    let message = tokio::time::timeout(
+        Duration::from_secs(10),
+        pending.action_required_stream.as_mut().unwrap().next(),
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let id = match &message.content[0] {
+        MessageContent::ActionRequired(action) => match &action.data {
+            ActionRequiredData::Elicitation { id, .. } => id,
+            _ => panic!(),
+        },
+        _ => panic!(),
+    };
+    fixture
+        .sessions
+        .action_required()
+        .claim_response(&fixture.ctx.session_id, id)
+        .await
+        .unwrap()
+        .submit(ElicitationOutcome::Accept(json!({"approve":true})))
+        .unwrap();
+    let result = future.await.unwrap().unwrap();
+    assert_ne!(result.is_error, Some(true), "{result:?}");
+    let parse = |result: CallToolResult| -> esi_development::DevelopmentState {
+        assert_ne!(result.is_error, Some(true), "{result:?}");
+        let value = serde_json::to_value(result).unwrap();
+        serde_json::from_str(value["content"][0]["text"].as_str().unwrap()).unwrap()
+    };
+    let state = parse(result);
+    assert_eq!(state.stage(), esi_development::DevelopmentStage::Implement);
+    assert_ne!(
+        state.worktree().unwrap().identity.worktree_path,
+        fixture.root.path()
+    );
+    let replay = parse(fixture.call("controller__start", args).await.unwrap());
+    assert_eq!(replay, state);
+    let validated = parse(
+        fixture
+            .call(
+                "controller__validate",
+                json!({"task_id":"T1", "request_id":"validate"}),
+            )
+            .await
+            .unwrap(),
+    );
+    assert_eq!(validated.stage(), esi_development::DevelopmentStage::Review);
+    assert!(validated.validation_runs().last().unwrap().passed);
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.path().join("result.txt")).unwrap(),
+        "original\n"
+    );
+    let mut changed = load_plan(fixture.root.path()).unwrap();
+    changed.request_revision("source changed").unwrap();
+    changed.save(fixture.root.path()).unwrap();
+    assert_eq!(
+        fixture
+            .call(
+                "controller__resume",
+                json!({"task_id":"T1", "request_id":"stale"})
+            )
+            .await
+            .unwrap()
+            .is_error,
+        Some(true)
+    );
+}
+
+#[tokio::test]
 async fn workspace_plan_template_factory_dispatch_does_not_grant_execution_approval() {
     let fixture = Fixture::new().await;
     let result = fixture
@@ -624,11 +774,12 @@ async fn authority_local_process_timeout_output_and_cancellation_are_bounded() {
     let timeout = fixture
         .call(
             "shell",
-            json!({"command":"(sleep 2; touch timeout-survived) & wait", "timeout_secs":1}),
+            json!({"command":"(while ! test -e timeout-release; do sleep 0.01; done; touch timeout-survived) & wait", "timeout_secs":1}),
         )
         .await
         .unwrap_err();
     assert!(timeout.to_string().contains("timed out"));
+    std::fs::write(fixture.root.path().join("timeout-release"), "release").unwrap();
     let output = fixture
         .call("shell", json!({"command":"yes excessive"}))
         .await
@@ -640,21 +791,28 @@ async fn authority_local_process_timeout_output_and_cancellation_are_bounded() {
         .dispatch_tool_call(
             &fixture.ctx,
             CallToolRequestParams::new("shell").with_arguments(
-                rmcp::object!({"command":"(sleep 2; touch cancel-survived) & wait"}),
+                rmcp::object!({"command":"(while ! test -e cancel-release; do sleep 0.01; done; touch cancel-survived) & touch cancel-ready; wait"}),
             ),
             cancel.clone(),
         )
         .await
         .unwrap();
     let running = tokio::spawn(call.result);
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !fixture.root.path().join("cancel-ready").exists() {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     cancel.cancel();
     assert!(tokio::time::timeout(Duration::from_secs(3), running)
         .await
         .unwrap()
         .unwrap()
         .is_err());
-    tokio::time::sleep(Duration::from_millis(2200)).await;
+    std::fs::write(fixture.root.path().join("cancel-release"), "release").unwrap();
+    tokio::time::sleep(Duration::from_millis(200)).await;
     assert!(!fixture.root.path().join("timeout-survived").exists());
     assert!(!fixture.root.path().join("cancel-survived").exists());
 }

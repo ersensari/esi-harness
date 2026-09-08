@@ -83,6 +83,10 @@ Two modes:
 - Search mode: Use query with keywords/synonyms to find relevant messages
 - Load mode: Use session_id to get first and last messages of a specific session
 
+## controller
+
+### Instructions
+Use approved workspace task IDs. Start requires exact human execution approval. Reuse request IDs only for retries of the same operation. Status is evidence, not a completion claim. Validate runs approved commands in the owned worktree with network denied. Resume reconciles interruption and routes failed validation to repair; it never silently reruns a validator.
 ## developer
 
 ### Instructions
