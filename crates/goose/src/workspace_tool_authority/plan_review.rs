@@ -58,7 +58,9 @@ pub(crate) async fn native_plan_review(sessions: &SessionManager, params: Value)
                 ),
                 "Finish plan discovery first"
             );
-            pending.retain(|_, review| review.session != session_id);
+            pending.retain(|_, review| {
+                review.session != session_id || review.plan.canonical_path() != root
+            });
             ensure!(
                 pending.len() < 64,
                 "Too many pending plan reviews; try again later"
@@ -81,9 +83,9 @@ pub(crate) async fn native_plan_review(sessions: &SessionManager, params: Value)
             approve,
         } => {
             ensure!(
-                pending
-                    .get(&token)
-                    .is_some_and(|review| review.session == session_id),
+                pending.get(&token).is_some_and(|review| {
+                    review.session == session_id && review.plan.canonical_path() == root
+                }),
                 "Review expired, already consumed, or belongs to another session"
             );
             let mut review = pending.remove(&token).expect("checked pending review");

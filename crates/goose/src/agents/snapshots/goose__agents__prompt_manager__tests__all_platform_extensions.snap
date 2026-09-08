@@ -153,7 +153,7 @@ Template:
 ## workspaceplan
 
 ### Instructions
-Use status first. For an unplanned workspace, discuss requirements and Innovation options with the user, then save_draft. Call approve only after the user explicitly accepts the displayed plan; Desktop will ask the user to confirm.
+Use status first. For an unplanned workspace, discuss requirements and Innovation options appropriate to scope. Use create_template for small_change or greenfield only when no authored plan exists; use save_draft to refine it. Existing plans must be reused. Read revision_diff before presenting a changed plan. Trusted native tools follow operator policy. Call approve only after the user explicitly accepts the displayed plan; Desktop will ask the user to confirm.
 
 # Response Guidelines
 

@@ -120,6 +120,51 @@ async fn native_plan_review_exact_snapshot_cancel_replay_cross_session_and_expir
 }
 
 #[tokio::test]
+async fn native_plan_review_same_session_id_in_distinct_workspaces_does_not_evict_or_consume() {
+    let first = Fixture::new().await;
+    let second = Fixture::new().await;
+    assert_eq!(first.ctx.session_id, second.ctx.session_id);
+    let mut tokens = Vec::new();
+    for fixture in [&first, &second] {
+        fixture.draft();
+        let plan = WorkspacePlan::load(fixture.root.path()).unwrap().unwrap();
+        tokens.push(
+            native_plan_review(
+                &fixture.sessions,
+                json!({
+                    "action":"prepare", "session_id":fixture.ctx.session_id,
+                    "hash":plan.content_hash(), "storage_revision":plan.storage_revision()
+                }),
+            )
+            .await
+            .unwrap()["token"]
+                .clone(),
+        );
+    }
+    let cancel_first = json!({"action":"complete", "session_id":first.ctx.session_id,
+        "token":tokens[0], "approve":false});
+    assert!(native_plan_review(&second.sessions, cancel_first.clone())
+        .await
+        .is_err());
+    assert_eq!(
+        native_plan_review(&first.sessions, cancel_first)
+            .await
+            .unwrap()["approved"],
+        false
+    );
+    assert_eq!(
+        native_plan_review(
+            &second.sessions,
+            json!({"action":"complete",
+        "session_id":second.ctx.session_id, "token":tokens[1], "approve":false})
+        )
+        .await
+        .unwrap()["approved"],
+        false
+    );
+}
+
+#[tokio::test]
 async fn native_plan_review_stale_snapshot_cannot_approve_newer_content_or_mint_receipt() {
     let fixture = Fixture::new().await;
     fixture.draft();

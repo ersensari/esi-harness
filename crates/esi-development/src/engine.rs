@@ -66,6 +66,7 @@ impl DevelopmentState {
         let mut state = Self {
             schema_version: SCHEMA_VERSION,
             storage_revision: 0,
+            operations: BTreeMap::new(),
             persisted_snapshot: None,
             run_id,
             stage: DevelopmentStage::Brief,
@@ -536,7 +537,7 @@ impl DevelopmentState {
                 state.emit(DevelopmentEventKind::WorktreeInspected { snapshot });
             }
         }
-        if state.schema_version == 2 {
+        if matches!(state.schema_version, 2 | 3) {
             state.schema_version = SCHEMA_VERSION;
         }
         state.persisted_snapshot = Some(snapshot);
@@ -684,6 +685,7 @@ impl DevelopmentState {
             _ => false,
         };
         if self.schema_version != SCHEMA_VERSION
+            || !self.operations_valid()
             || self.events.is_empty()
             || !sequences_valid
             || !history_valid

@@ -52,7 +52,6 @@ rustls-tls = [
     "rmcp/reqwest",
     "smithy-transport-reqwest?/rustls",
     "sqlx/tls-rustls",
-    "jsonwebtoken/aws_lc_rs",
     "oauth2/reqwest",
     "oauth2/rustls-tls",
     "goose-providers/rustls-tls",
@@ -70,7 +69,6 @@ native-tls = [
     "rmcp/reqwest-native-tls",
     "smithy-transport-reqwest?/native-tls",
     "sqlx/tls-native-tls",
-    "jsonwebtoken/rust_crypto",
     "oauth2/reqwest",
     "oauth2/native-tls",
     "goose-providers/native-tls",
@@ -165,7 +163,9 @@ smithy-transport-reqwest = { version = "0.1", default-features = false, features
 aws-sdk-sagemakerruntime = { version = "1.104", default-features = false, features = ["rt-tokio"], optional = true }
 
 # For GCP Vertex AI provider auth
-jsonwebtoken = { version = "11.0", default-features = false, features = ["use_pem"] }
+# JWT signing/verification is also used by the library without any TLS feature.
+# Keep its crypto backend independent of HTTP TLS to avoid zero/two providers.
+jsonwebtoken = { version = "11.0", default-features = false, features = ["use_pem", "rust_crypto"] }
 
 blake3 = { version = "1", default-features = false, features = ["std"] }
 fs2 = { workspace = true }

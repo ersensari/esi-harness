@@ -165,6 +165,8 @@ mod tests {
 
     #[test]
     fn test_get_log_directory_basic_functionality() {
+        let root = tempfile::tempdir().unwrap();
+        let _env = env_lock::lock_env([("GOOSE_PATH_ROOT", root.path().to_str())]);
         // Test basic directory creation without date subdirectory
         let result = prepare_log_directory("cli", false);
         assert!(result.is_ok());
@@ -187,6 +189,8 @@ mod tests {
 
     #[test]
     fn test_get_log_directory_with_date_subdir() {
+        let root = tempfile::tempdir().unwrap();
+        let _env = env_lock::lock_env([("GOOSE_PATH_ROOT", root.path().to_str())]);
         // Test date-based subdirectory creation
         let result = prepare_log_directory("server", true);
         assert!(result.is_ok());
@@ -216,6 +220,11 @@ mod tests {
 
     #[test]
     fn test_get_log_directory_idempotent() {
+        // Other fixtures change GOOSE_PATH_ROOT under this same environment
+        // lock. Hold it for the whole repeated-call assertion and use our own
+        // temporary directory, not another fixture's soon-to-be-deleted root.
+        let root = tempfile::tempdir().unwrap();
+        let _env = env_lock::lock_env([("GOOSE_PATH_ROOT", root.path().to_str())]);
         // Test that multiple calls return the same result and don't fail
         let component = "debug";
 
@@ -247,6 +256,8 @@ mod tests {
 
     #[test]
     fn test_get_log_directory_different_components() {
+        let root = tempfile::tempdir().unwrap();
+        let _env = env_lock::lock_env([("GOOSE_PATH_ROOT", root.path().to_str())]);
         // Test that different components create different directories
         let components = ["cli", "server", "debug"];
         let mut created_dirs = Vec::new();

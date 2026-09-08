@@ -3,6 +3,7 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
 use std::ffi::{OsStr, OsString};
 use std::fs;
+use std::io::Write;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 use thiserror::Error;
@@ -17,6 +18,10 @@ pub enum WorkspaceError {
     MainWorktreeRejected(PathBuf),
     #[error("ESI worktree metadata does not match the current repository relationship")]
     OwnershipMismatch,
+    #[error("ESI worktree creation has durable intent but no confirmed completion; explicit recovery is required")]
+    CreationInterrupted,
+    #[error("ESI worktree creation is busy")]
+    CreationBusy,
     #[error("ESI worktree contains uncommitted changes")]
     DirtyWorktree,
     #[error("human approval does not match the exact cleanup request")]
@@ -33,9 +38,17 @@ pub enum WorkspaceError {
 
 pub type Result<T> = std::result::Result<T, WorkspaceError>;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 #[serde(transparent)]
 pub struct SessionId(String);
+
+impl<'de> Deserialize<'de> for SessionId {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> std::result::Result<Self, D::Error> {
+        Self::new(String::deserialize(deserializer)?).map_err(serde::de::Error::custom)
+    }
+}
 
 impl SessionId {
     pub fn new(value: impl Into<String>) -> Result<Self> {
@@ -72,6 +85,7 @@ pub struct WorktreeIdentity {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LifecycleState {
+    Creating,
     Ready,
     CleanupPending,
     Cleaned,
@@ -159,6 +173,8 @@ impl WorkspaceManager {
     ) -> Result<WorktreeInspection> {
         let repository = RepositoryRelationship::inspect(source_repository.as_ref())?;
         let metadata_path = self.metadata_path(&repository.repository_id, &session_id);
+        // Held across durable intent, Git side effects and the Ready commit.
+        let _creation_lock = creation_lock(&metadata_path)?;
         if metadata_path.exists() {
             return self.resume(source_repository, &session_id);
         }
@@ -188,20 +204,11 @@ impl WorkspaceManager {
             return Err(WorkspaceError::OwnershipMismatch);
         }
 
+        if worktree_path.exists() {
+            return Err(WorkspaceError::OwnershipMismatch);
+        }
         fs::create_dir_all(worktree_path.parent().expect("worktree path has a parent"))?;
-        git(
-            &repository.main_worktree,
-            [
-                OsString::from("worktree"),
-                OsString::from("add"),
-                OsString::from("-b"),
-                OsString::from(&branch),
-                worktree_path.as_os_str().to_owned(),
-                OsString::from(&base_commit),
-            ],
-        )?;
-
-        let record = WorktreeRecord {
+        let mut record = WorktreeRecord {
             identity: WorktreeIdentity {
                 schema_version: SCHEMA_VERSION,
                 session_id,
@@ -214,8 +221,24 @@ impl WorkspaceManager {
                 main_head_at_creation: repository.main_head,
                 main_was_dirty: repository.main_dirty,
             },
-            state: LifecycleState::Ready,
+            state: LifecycleState::Creating,
         };
+        // Never leave a Git-created worktree without an attributable intent.
+        // A crash or Git error deliberately retains Creating: no prefix-based
+        // adoption, automatic deletion, or second start on ambiguous resources.
+        self.write_record(&record)?;
+        git(
+            &record.identity.main_worktree,
+            [
+                OsString::from("worktree"),
+                OsString::from("add"),
+                OsString::from("-b"),
+                OsString::from(&record.identity.branch),
+                record.identity.worktree_path.as_os_str().to_owned(),
+                OsString::from(&record.identity.base_commit),
+            ],
+        )?;
+        record.state = LifecycleState::Ready;
         self.write_record(&record)?;
         self.inspect_record(record)
     }
@@ -247,6 +270,9 @@ impl WorkspaceManager {
         let repository = RepositoryRelationship::inspect(source_repository.as_ref())?;
         let record = self.read_record(&repository.repository_id, session_id)?;
         self.verify_relationship(&repository, &record)?;
+        if record.state == LifecycleState::Creating {
+            return Err(WorkspaceError::CreationInterrupted);
+        }
         if !record.identity.worktree_path.exists() {
             return Ok(RecoveryStatus::MissingWorktree(record));
         }
@@ -433,6 +459,9 @@ impl WorkspaceManager {
     }
 
     fn inspect_record(&self, record: WorktreeRecord) -> Result<WorktreeInspection> {
+        if record.state == LifecycleState::Creating {
+            return Err(WorkspaceError::CreationInterrupted);
+        }
         if record.state == LifecycleState::Cleaned {
             return Err(WorkspaceError::OwnershipMismatch);
         }
@@ -515,16 +544,53 @@ impl WorkspaceManager {
 
     fn read_record(&self, repository_id: &str, session_id: &SessionId) -> Result<WorktreeRecord> {
         let bytes = fs::read(self.metadata_path(repository_id, session_id))?;
-        Ok(serde_json::from_slice(&bytes)?)
+        let record: WorktreeRecord = serde_json::from_slice(&bytes)?;
+        if record.identity.session_id != *session_id
+            || record.identity.repository_id != repository_id
+        {
+            return Err(WorkspaceError::OwnershipMismatch);
+        }
+        Ok(record)
     }
 
     fn write_record(&self, record: &WorktreeRecord) -> Result<()> {
         let path = self.metadata_path(&record.identity.repository_id, &record.identity.session_id);
         fs::create_dir_all(path.parent().expect("metadata path has a parent"))?;
-        let temporary = path.with_extension("json.tmp");
-        fs::write(&temporary, serde_json::to_vec_pretty(record)?)?;
-        fs::rename(temporary, path)?;
+        let parent = path.parent().expect("metadata path has a parent");
+        let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
+        temporary.write_all(&serde_json::to_vec_pretty(record)?)?;
+        temporary.as_file().sync_all()?;
+        temporary.persist(&path).map_err(|error| error.error)?;
+        #[cfg(unix)]
+        fs::File::open(parent)?.sync_all()?;
         Ok(())
+    }
+}
+
+fn creation_lock(metadata_path: &Path) -> Result<fs::File> {
+    fs::create_dir_all(metadata_path.parent().expect("metadata path has a parent"))?;
+    let path = metadata_path.with_extension("create.lock");
+    if fs::symlink_metadata(&path).is_ok_and(|m| !m.file_type().is_file()) {
+        return Err(WorkspaceError::OwnershipMismatch);
+    }
+    let file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(path)?;
+    let started = std::time::Instant::now();
+    loop {
+        match fs2::FileExt::try_lock_exclusive(&file) {
+            Ok(()) => return Ok(file),
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                if started.elapsed() >= std::time::Duration::from_secs(2) {
+                    return Err(WorkspaceError::CreationBusy);
+                }
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+            Err(error) => return Err(error.into()),
+        }
     }
 }
 

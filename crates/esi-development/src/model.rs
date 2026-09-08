@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 use thiserror::Error;
 
-pub(crate) const SCHEMA_VERSION: u32 = 3;
+pub(crate) const SCHEMA_VERSION: u32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -362,6 +362,8 @@ pub struct DevelopmentState {
     pub(crate) schema_version: u32,
     #[serde(default)]
     pub(crate) storage_revision: u64,
+    #[serde(default)]
+    pub(crate) operations: BTreeMap<String, crate::operations::OperationRecord>,
     #[serde(skip)]
     pub(crate) persisted_snapshot: Option<esi_workspace_plan::storage::Snapshot>,
     pub(crate) run_id: String,

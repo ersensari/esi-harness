@@ -51,13 +51,14 @@ fn independent_controller_writers_cannot_lose_updates_or_duplicate_creates() {
 
 #[test]
 fn legacy_controller_schemas_migrate_without_rewriting_on_load() {
-    for version in [1, 2] {
+    for version in [1, 2, 3] {
         let root = tempfile::tempdir().unwrap();
         let path = root.path().join("state.json");
         let state = DevelopmentState::new("legacy", RepairPolicy::default()).unwrap();
         let mut legacy = serde_json::to_value(state).unwrap();
         legacy["schema_version"] = version.into();
         legacy.as_object_mut().unwrap().remove("storage_revision");
+        legacy.as_object_mut().unwrap().remove("operations");
         let bytes = serde_json::to_vec(&legacy).unwrap();
         fs::write(&path, &bytes).unwrap();
         let mut a = DevelopmentState::load(&path).unwrap();
@@ -70,7 +71,7 @@ fn legacy_controller_schemas_migrate_without_rewriting_on_load() {
             Err(DevelopmentError::Persistence(PersistenceError::Conflict))
         ));
         let stored: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
-        assert_eq!(stored["schema_version"], 3);
+        assert_eq!(stored["schema_version"], 4);
         assert_eq!(stored["storage_revision"], 1);
     }
 }

@@ -11,6 +11,143 @@ struct Fixture {
     manager: WorkspaceManager,
 }
 
+#[test]
+fn concurrent_starts_create_exactly_one_owned_worktree() {
+    let fixture = Fixture::new();
+    let barrier = std::sync::Barrier::new(4);
+    let inspections = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                scope.spawn(|| {
+                    barrier.wait();
+                    fixture
+                        .manager
+                        .create(
+                            &fixture.repository,
+                            SessionId::new("concurrent").unwrap(),
+                            "HEAD",
+                        )
+                        .unwrap()
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect::<Vec<_>>()
+    });
+    assert!(inspections.iter().all(|i| i == &inspections[0]));
+    let list = git_stdout(&fixture.repository, ["worktree", "list", "--porcelain"]);
+    assert_eq!(
+        list.lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn creation_writer_process() {
+    let Ok(root) = std::env::var("ESI_WORKTREE_CREATE_TEST_ROOT") else {
+        return;
+    };
+    let root = Path::new(&root);
+    WorkspaceManager::new(root.join("metadata"), root.join("worktrees"))
+        .create(
+            root.join("repository"),
+            SessionId::new("process-race").unwrap(),
+            "HEAD",
+        )
+        .unwrap();
+}
+
+#[test]
+fn independent_processes_create_only_one_worktree() {
+    let fixture = Fixture::new();
+    let mut children = Vec::new();
+    for _ in 0..4 {
+        children.push(
+            Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "creation_writer_process", "--quiet"])
+                .env("ESI_WORKTREE_CREATE_TEST_ROOT", fixture._root.path())
+                .spawn()
+                .unwrap(),
+        );
+    }
+    for child in &mut children {
+        assert!(child.wait().unwrap().success());
+    }
+    let list = git_stdout(&fixture.repository, ["worktree", "list", "--porcelain"]);
+    assert_eq!(
+        list.lines()
+            .filter(|line| line.starts_with("worktree "))
+            .count(),
+        2
+    );
+    let inspection = fixture
+        .manager
+        .resume(
+            &fixture.repository,
+            &SessionId::new("process-race").unwrap(),
+        )
+        .unwrap();
+    assert_eq!(inspection.record.state, LifecycleState::Ready);
+}
+
+#[test]
+fn interrupted_creation_is_not_adopted_or_repeated() {
+    let fixture = Fixture::new();
+    let id = SessionId::new("interrupted").unwrap();
+    let created = fixture
+        .manager
+        .create(&fixture.repository, id.clone(), "HEAD")
+        .unwrap();
+    let path = fixture
+        ._root
+        .path()
+        .join("metadata")
+        .join(&created.record.identity.repository_id)
+        .join("interrupted.json");
+    let mut intent = created.record;
+    intent.state = LifecycleState::Creating;
+    std::fs::write(&path, serde_json::to_vec(&intent).unwrap()).unwrap();
+    let before = git_stdout(&fixture.repository, ["worktree", "list", "--porcelain"]);
+    assert!(matches!(
+        fixture
+            .manager
+            .create(&fixture.repository, id.clone(), "HEAD"),
+        Err(WorkspaceError::CreationInterrupted)
+    ));
+    assert!(matches!(
+        fixture.manager.resume(&fixture.repository, &id),
+        Err(WorkspaceError::CreationInterrupted)
+    ));
+    assert!(matches!(
+        fixture.manager.recover(&fixture.repository, &id),
+        Err(WorkspaceError::CreationInterrupted)
+    ));
+    assert_eq!(
+        git_stdout(&fixture.repository, ["worktree", "list", "--porcelain"]),
+        before
+    );
+    assert_eq!(
+        serde_json::from_slice::<esi_workspace::WorktreeRecord>(&std::fs::read(path).unwrap())
+            .unwrap(),
+        intent
+    );
+}
+
+#[test]
+fn deserialized_session_id_cannot_bypass_path_validation() {
+    for value in ["../other", "/tmp/other", "", "a/b"] {
+        assert!(serde_json::from_value::<SessionId>(serde_json::json!(value)).is_err());
+    }
+    assert_eq!(
+        serde_json::from_str::<SessionId>("\"valid-1\"").unwrap(),
+        SessionId::new("valid-1").unwrap()
+    );
+}
+
 impl Fixture {
     fn new() -> Self {
         let root = tempfile::tempdir().unwrap();
