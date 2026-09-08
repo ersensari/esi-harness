@@ -16,6 +16,7 @@ use crate::agents::{mcp_client::McpClientTrait, ToolCallContext};
 use crate::config::Config;
 use crate::session::SessionManager;
 
+pub(crate) mod controller_binding;
 mod plan_review;
 mod sandbox;
 pub(crate) use plan_review::native_plan_review;
@@ -298,7 +299,22 @@ pub(crate) async fn execute(
             if matches!(tool, "shell" | "write" | "edit") {
                 require_receipt(&root)?;
             }
-            sandbox::execute(&root, tool, arguments.unwrap_or_default(), cancellation).await
+            let binding =
+                controller_binding::managed_worktree(sessions, &ctx.session_id, &root, tool)
+                    .await?;
+            let execution_root = binding
+                .as_ref()
+                .map(|lease| lease.inspection().record.identity.worktree_path.as_path())
+                .unwrap_or(&root);
+            let result = sandbox::execute(
+                execution_root,
+                tool,
+                arguments.unwrap_or_default(),
+                cancellation,
+            )
+            .await;
+            drop(binding);
+            result
         }
     }
 }

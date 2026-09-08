@@ -90,6 +90,8 @@ impl ControllerClient {
                 .await?
                 .map_err(Into::into);
         }
+        ensure!(context.requires_workspace_receipt,
+            "Controller-managed mutation requires Desktop authority; native CLI execution is not a managed controller run");
         crate::workspace_tool_authority::require_receipt(&root)?;
         ensure!(
             !cancellation.is_cancelled(),
@@ -97,6 +99,12 @@ impl ControllerClient {
         );
         let request_id = input.request_id.context("request_id is required")?;
         if name == "start" {
+            crate::workspace_tool_authority::controller_binding::check_start(
+                &self.sessions,
+                &context.session_id,
+                &root,
+                &input.task_id,
+            )?;
             let interactive = context
                 .tool_call_request_id
                 .clone()
@@ -125,10 +133,15 @@ impl ControllerClient {
             };
             let approved = matches!(result, Some(Ok(crate::action_required_manager::ElicitationOutcome::Accept(ref v))) if v == &json!({"approve":true}));
             crate::workspace_tool_authority::require_receipt(&root)?;
-            let state = tokio::task::spawn_blocking(move || {
-                service.complete_start(*prepared, approved.then_some("desktop-user"))
-            })
-            .await??;
+            let state = crate::workspace_tool_authority::controller_binding::commit_start(
+                &self.sessions,
+                &context.session_id,
+                &root,
+                service,
+                *prepared,
+                approved,
+            )
+            .await?;
             if !approved {
                 bail!(
                     "Task execution was not approved; no validators or implementation were started"

@@ -61,6 +61,22 @@ async fn controller_factory_requires_human_start_and_dispatches_real_validation(
         "arguments":["-c","test \"$(cat result.txt)\" = original"], "required":true
     }]});
     let mut direct = fixture.ctx.clone();
+    direct.requires_workspace_receipt = false;
+    let native_client = crate::agents::platform_extensions::controller::ControllerClient::new(
+        fixture.manager.get_context().clone(),
+    )
+    .unwrap();
+    let unsupported = crate::agents::mcp_client::McpClientTrait::call_tool(
+        &native_client,
+        &direct,
+        "start",
+        Some(args.as_object().unwrap().clone()),
+        CancellationToken::new(),
+    )
+    .await
+    .unwrap();
+    assert_eq!(unsupported.is_error, Some(true));
+    direct.requires_workspace_receipt = true;
     direct.tool_call_request_id = None;
     let result = fixture
         .manager
@@ -135,6 +151,71 @@ async fn controller_factory_requires_human_start_and_dispatches_real_validation(
         state.worktree().unwrap().identity.worktree_path,
         fixture.root.path()
     );
+    let owned = &state.worktree().unwrap().identity.worktree_path;
+    let write = fixture
+        .call(
+            "write",
+            json!({"path":"owned-only.txt", "content":"bound write"}),
+        )
+        .await
+        .unwrap();
+    assert_ne!(write.is_error, Some(true));
+    assert_eq!(
+        std::fs::read_to_string(owned.join("owned-only.txt")).unwrap(),
+        "bound write"
+    );
+    assert!(!fixture.root.path().join("owned-only.txt").exists());
+    assert!(fixture
+        .call(
+            "write",
+            json!({"path":fixture.root.path().join("main-bypass.txt"), "content":"bad"})
+        )
+        .await
+        .is_err());
+    let other = fixture
+        .sessions
+        .create_session(
+            fixture.root.path().into(),
+            "unbound chat".into(),
+            SessionType::User,
+            GooseMode::Auto,
+        )
+        .await
+        .unwrap();
+    let other_ctx = ToolCallContext::new(
+        other.id,
+        Some(fixture.root.path().into()),
+        Some("other-write".into()),
+    );
+    assert!(fixture
+        .manager
+        .dispatch_tool_call(
+            &other_ctx,
+            CallToolRequestParams::new("write")
+                .with_arguments(rmcp::object!({"path":"other-bypass.txt", "content":"bad"})),
+            CancellationToken::new()
+        )
+        .await
+        .unwrap()
+        .result
+        .await
+        .is_err());
+    assert!(!fixture.root.path().join("other-bypass.txt").exists());
+    let mut wrong_ctx = fixture.ctx.clone();
+    wrong_ctx.working_dir = Some(owned.clone());
+    assert!(fixture
+        .manager
+        .dispatch_tool_call(
+            &wrong_ctx,
+            CallToolRequestParams::new("write")
+                .with_arguments(rmcp::object!({"path":"wrong-context.txt", "content":"bad"})),
+            CancellationToken::new()
+        )
+        .await
+        .unwrap()
+        .result
+        .await
+        .is_err());
     let replay = parse(fixture.call("controller__start", args).await.unwrap());
     assert_eq!(replay, state);
     let validated = parse(
@@ -148,6 +229,57 @@ async fn controller_factory_requires_human_start_and_dispatches_real_validation(
     );
     assert_eq!(validated.stage(), esi_development::DevelopmentStage::Review);
     assert!(validated.validation_runs().last().unwrap().passed);
+    assert!(fixture
+        .call("write", json!({"path":"after-review.txt", "content":"bad"}))
+        .await
+        .is_err());
+    // The narrowed config has a different fingerprint from parallel fixtures.
+    use crate::config::extensions::{
+        get_all_extensions, remove_extension, set_extension, ExtensionEntry,
+    };
+    let previous = get_all_extensions()
+        .into_iter()
+        .find(|entry| entry.config.key() == "developer");
+    let mut trusted = platform("developer");
+    if let ExtensionConfig::Platform {
+        available_tools, ..
+    } = &mut trusted
+    {
+        *available_tools = vec!["write".into()];
+    }
+    set_extension(ExtensionEntry {
+        enabled: true,
+        config: trusted.clone(),
+    });
+    crate::extension_trust::set_trusted(Config::global(), "developer", true).unwrap();
+    fixture
+        .manager
+        .add_extension(
+            trusted,
+            Some(fixture.root.path().into()),
+            None,
+            Some(&fixture.ctx.session_id),
+        )
+        .await
+        .unwrap();
+    let native = fixture
+        .call(
+            "write",
+            json!({"path":"trusted-native.txt", "content":"operator-trusted"}),
+        )
+        .await
+        .unwrap();
+    crate::extension_trust::set_trusted(Config::global(), "developer", false).unwrap();
+    if let Some(previous) = previous {
+        set_extension(previous);
+    } else {
+        remove_extension("developer");
+    }
+    assert_ne!(native.is_error, Some(true));
+    assert_eq!(
+        std::fs::read_to_string(fixture.root.path().join("trusted-native.txt")).unwrap(),
+        "operator-trusted"
+    );
     assert_eq!(
         std::fs::read_to_string(fixture.root.path().join("result.txt")).unwrap(),
         "original\n"

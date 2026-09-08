@@ -49,7 +49,52 @@ pub enum StartPreparation {
     Recorded(Box<DevelopmentState>),
 }
 
+pub struct ManagedWorktreeLease {
+    inspection: WorktreeInspection,
+    _lease: OperationLease,
+}
+impl ManagedWorktreeLease {
+    pub fn inspection(&self) -> &WorktreeInspection {
+        &self.inspection
+    }
+}
+
 impl ControllerService {
+    pub fn lease_implementation(
+        &self,
+        task_id: &str,
+        expected_run_id: &str,
+    ) -> Result<ManagedWorktreeLease, DevelopmentError> {
+        let lease = self.lease(task_id)?;
+        let state = self.status(task_id)?;
+        self.require_current(&state)?;
+        if state.run_id() != expected_run_id
+            || !matches!(
+                state.stage(),
+                DevelopmentStage::Implement | DevelopmentStage::Repair
+            )
+            || state
+                .operations()
+                .values()
+                .any(|operation| operation.status == OperationStatus::Started)
+        {
+            return Err(invalid("run is not the active implementation/repair task"));
+        }
+        let inspection = self
+            .workspaces
+            .inspect(&self.source, &SessionId::new(state.run_id())?)?;
+        if state
+            .worktree()
+            .is_none_or(|binding| binding.identity != inspection.record.identity)
+        {
+            return Err(DevelopmentError::WorktreeBindingMismatch);
+        }
+        Ok(ManagedWorktreeLease {
+            inspection,
+            _lease: lease,
+        })
+    }
+
     pub fn new(
         source: impl AsRef<Path>,
         host_data: impl AsRef<Path>,

@@ -301,3 +301,59 @@ fn contained_validator_cannot_connect_to_host_loopback() {
         .unwrap();
     assert!(state.validation_runs()[0].passed);
 }
+
+#[test]
+fn managed_lease_rejects_wrong_run_and_excludes_validation_until_released() {
+    let fixture = Fixture::new();
+    let state = fixture.start("true");
+    assert!(fixture
+        .service
+        .lease_implementation("T1", "wrong-run")
+        .is_err());
+    let lease = fixture
+        .service
+        .lease_implementation("T1", state.run_id())
+        .unwrap();
+    assert_eq!(
+        lease.inspection().record.identity.worktree_path,
+        state.worktree().unwrap().identity.worktree_path
+    );
+    assert!(fixture
+        .service
+        .validate("T1", "concurrent", &ValidationControl::default())
+        .is_err());
+    drop(lease);
+    assert!(
+        fixture
+            .service
+            .validate("T1", "after-write", &ValidationControl::default())
+            .unwrap()
+            .validation_runs()[0]
+            .passed
+    );
+    assert!(fixture
+        .service
+        .lease_implementation("T1", state.run_id())
+        .is_err());
+}
+
+#[test]
+fn interrupted_operation_requires_reconciliation_before_managed_writes() {
+    let fixture = Fixture::new();
+    let mut state = fixture.start("true");
+    let mut request = state.operations()["start"].request.clone();
+    request.request_id = "crashed-validation".into();
+    request.kind = OperationKind::Validate;
+    state
+        .reserve_operation(fixture.service.state_path("T1").unwrap(), request)
+        .unwrap();
+    assert!(fixture
+        .service
+        .lease_implementation("T1", state.run_id())
+        .is_err());
+    fixture.service.resume("T1", "reconcile").unwrap();
+    assert!(fixture
+        .service
+        .lease_implementation("T1", state.run_id())
+        .is_ok());
+}

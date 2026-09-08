@@ -194,7 +194,7 @@ mod authority_tests {
             true,
             GoosePlatform::GooseDesktop,
         )));
-        for name in ["developer", "workspaceplan"] {
+        for name in ["developer", "workspaceplan", "controller"] {
             agent
                 .extension_manager
                 .add_extension(
@@ -212,7 +212,9 @@ mod authority_tests {
                 .await
                 .unwrap();
         }
-        server.register_acp_session(session.id.clone(), agent).await;
+        server
+            .register_acp_session(session.id.clone(), agent.clone())
+            .await;
         let status = server
             .on_call_tool(GooseToolCallRequest {
                 session_id: session.id.clone(),
@@ -241,5 +243,125 @@ mod authority_tests {
             assert!(error.data.unwrap().to_string().contains("ESI authority"));
         }
         assert!(!workspace.path().join("bypass").exists());
+
+        for args in [
+            vec!["init", "-b", "main"],
+            vec!["config", "user.name", "ACP fixture"],
+            vec!["config", "user.email", "acp@example.invalid"],
+            vec!["commit", "--allow-empty", "-m", "fixture"],
+        ] {
+            assert!(std::process::Command::new("git")
+                .current_dir(workspace.path())
+                .args(args)
+                .output()
+                .unwrap()
+                .status
+                .success());
+        }
+        let mut plan =
+            esi_workspace_plan::WorkspacePlan::new(workspace.path(), "ACP bound task").unwrap();
+        plan.set_requirements(vec![esi_workspace_plan::Requirement {
+            id: "R1".into(),
+            description: "Bound file".into(),
+            acceptance_criteria: vec!["Main unchanged".into()],
+            priority: esi_workspace_plan::Priority::Must,
+        }])
+        .unwrap();
+        plan.set_plan_content(
+            "Write in owned worktree",
+            "Local",
+            vec![esi_workspace_plan::PlannedTask {
+                id: "T1".into(),
+                title: "Write".into(),
+                description: "Owned file".into(),
+                status: esi_workspace_plan::PlannedTaskStatus::Pending,
+            }],
+        )
+        .unwrap();
+        plan.save(workspace.path()).unwrap();
+        let prepared = crate::workspace_tool_authority::native_plan_review(&server.session_manager, serde_json::json!({
+            "action":"prepare", "session_id":session.id, "hash":plan.content_hash(), "storage_revision":plan.storage_revision()
+        })).await.unwrap();
+        crate::workspace_tool_authority::native_plan_review(&server.session_manager, serde_json::json!({
+            "action":"complete", "session_id":session.id, "token":prepared["token"], "approve":true
+        })).await.unwrap();
+        let service = esi_development::ControllerService::new(
+            workspace.path(),
+            server.session_manager.controller_data_dir(),
+            session.id.clone(),
+        )
+        .unwrap();
+        let validators = vec![esi_development::ValidationCommand {
+            id: "test".into(),
+            category: esi_development::ValidationCategory::TargetedTests,
+            program: "/bin/true".into(),
+            arguments: vec![],
+            required: true,
+        }];
+        let denied = server.on_call_tool(GooseToolCallRequest {
+            session_id:session.id.clone(), name:"controller__start".into(),
+            arguments:serde_json::json!({"task_id":"T1", "request_id":"app-start", "validators":validators})
+        }).await.unwrap();
+        assert!(
+            denied.is_error,
+            "ACP app cannot synthesize human execution approval"
+        );
+        let esi_development::StartPreparation::Ready(prepared) = service
+            .prepare_start(
+                "T1",
+                "host-start",
+                esi_development::ValidationPlan::new(validators).unwrap(),
+            )
+            .unwrap()
+        else {
+            panic!();
+        };
+        let state = crate::workspace_tool_authority::controller_binding::commit_start(
+            &server.session_manager,
+            &session.id,
+            workspace.path(),
+            service,
+            *prepared,
+            true,
+        )
+        .await
+        .unwrap();
+        let write = server
+            .on_call_tool(GooseToolCallRequest {
+                session_id: session.id.clone(),
+                name: "write".into(),
+                arguments: serde_json::json!({"path":"acp-owned.txt", "content":"owned"}),
+            })
+            .await
+            .unwrap();
+        assert!(!write.is_error);
+        assert!(state
+            .worktree()
+            .unwrap()
+            .identity
+            .worktree_path
+            .join("acp-owned.txt")
+            .exists());
+        assert!(!workspace.path().join("acp-owned.txt").exists());
+        let other = server
+            .session_manager
+            .create_session(
+                workspace.path().into(),
+                "other".into(),
+                SessionType::Acp,
+                GooseMode::Auto,
+            )
+            .await
+            .unwrap();
+        server.register_acp_session(other.id.clone(), agent).await;
+        assert!(server
+            .on_call_tool(GooseToolCallRequest {
+                session_id: other.id,
+                name: "write".into(),
+                arguments: serde_json::json!({"path":"wrong-task.txt", "content":"bad"})
+            })
+            .await
+            .is_err());
+        assert!(!workspace.path().join("wrong-task.txt").exists());
     }
 }

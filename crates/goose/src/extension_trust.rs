@@ -64,7 +64,7 @@ pub(crate) fn tool_is_trusted(name: &str) -> bool {
         None => return false,
     };
     // Structured approval always retains its exact human-receipt semantics.
-    if key == "workspaceplan" && tool == "approve" {
+    if key == "controller" || (key == "workspaceplan" && tool == "approve") {
         return false;
     }
     let config = Config::global();

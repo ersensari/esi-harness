@@ -2539,6 +2539,7 @@ impl ExtensionManager {
                         .unwrap_or((None, false))
                 };
                 if !trusted
+                    || resolved_tool.extension_name == "controller"
                     || (resolved_tool.extension_name == "workspaceplan"
                         && actual_tool_name == "approve")
                 {
