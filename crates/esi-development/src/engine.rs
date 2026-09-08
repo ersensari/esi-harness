@@ -38,6 +38,7 @@ pub fn is_transition_allowed(from: DevelopmentStage, to: DevelopmentStage) -> bo
             | (DevelopmentStage::HumanGate, DevelopmentStage::Repair)
             | (DevelopmentStage::HumanGate, DevelopmentStage::Abandoned)
             | (DevelopmentStage::Review, DevelopmentStage::Diagnose)
+            | (DevelopmentStage::CompletionGate, DevelopmentStage::Diagnose)
             | (DevelopmentStage::Review, DevelopmentStage::CompletionGate)
             | (DevelopmentStage::Review, DevelopmentStage::HumanGate)
             | (
@@ -52,6 +53,51 @@ pub fn is_transition_allowed(from: DevelopmentStage, to: DevelopmentStage) -> bo
 }
 
 impl DevelopmentState {
+    /// A host-observed file change invalidates prior review/completion evidence.
+    pub fn invalidate_changed_snapshot(
+        &mut self,
+        inspection: &WorktreeInspection,
+    ) -> Result<(), DevelopmentError> {
+        if !matches!(
+            self.stage,
+            DevelopmentStage::Review | DevelopmentStage::CompletionGate
+        ) {
+            return Err(self.invalid_transition(DevelopmentStage::Diagnose));
+        }
+        if self
+            .worktree
+            .as_ref()
+            .is_none_or(|w| w.identity != inspection.record.identity)
+        {
+            return Err(DevelopmentError::WorktreeBindingMismatch);
+        }
+        if self.validated_snapshot_id.as_deref() == Some(&inspection.snapshot_id) {
+            return Ok(());
+        }
+        let failure = PendingFailure {
+            category: FailureCategory::Scope,
+            fingerprint: fingerprint(
+                FailureCategory::Scope,
+                "snapshot",
+                "Files changed after validation",
+                &inspection.record.identity.worktree_path,
+            ),
+            source_id: "snapshot".into(),
+            summary: "Files changed after validation; revalidation required".into(),
+        };
+        *self
+            .fingerprint_occurrences
+            .entry(failure.fingerprint.clone())
+            .or_default() += 1;
+        self.pending_failure = Some(failure.clone());
+        self.validated_snapshot_id = None;
+        self.emit(DevelopmentEventKind::FailureRouted {
+            failure,
+            destination: DevelopmentStage::Diagnose,
+        });
+        self.transition(DevelopmentStage::Diagnose)
+    }
+
     pub fn new(
         run_id: impl Into<String>,
         repair_policy: RepairPolicy,

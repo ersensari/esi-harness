@@ -794,6 +794,10 @@ impl Config {
         &self,
         key: &str,
     ) -> Result<T, ConfigError> {
+        // load_write_config can persist catalog migrations. Serialize this
+        // host-authority read with writes so migration cannot overwrite a
+        // concurrently saved Trust grant or controller binding.
+        let _guard = self.guard.lock().unwrap();
         let values = self.load_write_config()?;
         let value = values
             .get(key)
@@ -1532,6 +1536,36 @@ mod tests {
         let value: u64 = config.get_param("XXX_TIMEOUT")?;
         assert_eq!(value, 300);
         Ok(())
+    }
+
+    #[test]
+    fn host_authority_reads_serialize_catalog_migration_with_updates() {
+        let config = std::sync::Arc::new(new_test_config());
+        config.set_param("host-counter", 0_u64).unwrap();
+        let workers: Vec<_> = (0..4)
+            .map(|worker| {
+                let config = config.clone();
+                std::thread::spawn(move || {
+                    for step in 0..25 {
+                        if worker == 0 {
+                            // Forces a catalog migration on the next host read.
+                            config
+                                .set_param("extensions", serde_yaml::Mapping::new())
+                                .unwrap();
+                        }
+                        config
+                            .update_param("host-counter", |value: u64| value + 1)
+                            .unwrap();
+                        let value: u64 = config.get_stored_param("host-counter").unwrap();
+                        assert!(value > step);
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        assert_eq!(config.get_stored_param::<u64>("host-counter").unwrap(), 100);
     }
 
     #[test]

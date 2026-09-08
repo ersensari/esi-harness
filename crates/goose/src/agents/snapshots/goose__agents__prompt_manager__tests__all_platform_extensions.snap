@@ -85,8 +85,9 @@ Two modes:
 
 ## controller
 
+controller supports resources.
 ### Instructions
-Use approved workspace task IDs. Start requires exact human execution approval. Reuse request IDs only for retries of the same operation. Status is evidence, not a completion claim. Validate runs approved commands in the owned worktree with network denied. Resume reconciles interruption and routes failed validation to repair; it never silently reruns a validator.
+Use approved workspace task IDs. Start requires exact human execution approval. Reuse request IDs only for retries of the same operation. Status is evidence, not a completion claim. Validate runs approved commands in the owned worktree with network denied. Resume reconciles interruption and routes failed validation or stale snapshots to repair; it never silently reruns a validator. After validation passes, request human review, then human complete for the exact delivery snapshot. Unmapped criteria need human inspection. Never merge or publish automatically.
 ## developer
 
 ### Instructions

@@ -11,6 +11,8 @@ pub enum OperationKind {
     Start,
     Validate,
     Resume,
+    Review,
+    Complete,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -114,6 +116,8 @@ impl DevelopmentState {
             ));
         }
         let legal = match request.kind {
+            OperationKind::Review => self.stage == DevelopmentStage::Review,
+            OperationKind::Complete => self.stage == DevelopmentStage::CompletionGate,
             OperationKind::Start => self.stage == DevelopmentStage::Plan,
             OperationKind::Validate => matches!(
                 self.stage,

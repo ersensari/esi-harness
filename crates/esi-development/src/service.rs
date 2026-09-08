@@ -49,6 +49,42 @@ pub enum StartPreparation {
     Recorded(Box<DevelopmentState>),
 }
 
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct CriterionEvidence {
+    pub criterion: String,
+    pub validators: Vec<String>,
+    pub covered_by_current_required_tests: bool,
+}
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct DeliveryEvidence {
+    pub snapshot_id: String,
+    pub source_plan_hash: String,
+    pub source_revision: u64,
+    pub changed_files: Vec<String>,
+    pub tracked_diff: String,
+    pub diff_truncated: bool,
+    pub criteria: Vec<CriterionEvidence>,
+    pub current: bool,
+}
+pub struct PreparedGate {
+    state: DevelopmentState,
+    inspection: WorktreeInspection,
+    evidence: DeliveryEvidence,
+    task_id: String,
+    request_id: String,
+    kind: OperationKind,
+    _lease: OperationLease,
+}
+impl PreparedGate {
+    pub fn evidence(&self) -> &DeliveryEvidence {
+        &self.evidence
+    }
+}
+pub enum GatePreparation {
+    Ready(Box<PreparedGate>),
+    Recorded(Box<DevelopmentState>),
+}
+
 pub struct ManagedWorktreeLease {
     inspection: WorktreeInspection,
     _lease: OperationLease,
@@ -60,6 +96,156 @@ impl ManagedWorktreeLease {
 }
 
 impl ControllerService {
+    pub fn delivery(&self, task_id: &str) -> Result<DeliveryEvidence, DevelopmentError> {
+        let state = self.status(task_id)?;
+        let plan = self.require_current(&state)?;
+        let id = SessionId::new(state.run_id())?;
+        let inspection = self.workspaces.inspect(&self.source, &id)?;
+        let current = self.evidence_current(task_id)?;
+        let contract = plan.task_contracts().get(task_id);
+        let criteria =
+            if let Some(contract) = contract.filter(|c| !c.acceptance_criteria.is_empty()) {
+                contract
+                    .acceptance_criteria
+                    .iter()
+                    .map(|criterion| {
+                        let validators: Vec<String> = contract
+                            .validation_expectations
+                            .iter()
+                            .filter(|v| v.criterion_ids.contains(&criterion.id))
+                            .map(|v| v.id.clone())
+                            .collect();
+                        let covered = current
+                            && !validators.is_empty()
+                            && validators.iter().all(|id| {
+                                state.validation_runs().last().is_some_and(|r| {
+                                    r.evidence.iter().any(|e| {
+                                        e.validator_id == *id
+                                            && e.required
+                                            && e.outcome == ValidationOutcome::Passed
+                                    })
+                                })
+                            });
+                        CriterionEvidence {
+                            criterion: format!("{}: {}", criterion.id, criterion.description),
+                            validators,
+                            covered_by_current_required_tests: covered,
+                        }
+                    })
+                    .collect()
+            } else {
+                state
+                    .brief()
+                    .into_iter()
+                    .flat_map(|b| &b.acceptance_criteria)
+                    .map(|c| CriterionEvidence {
+                        criterion: c.clone(),
+                        validators: vec![],
+                        covered_by_current_required_tests: false,
+                    })
+                    .collect()
+            };
+        let diff = self.workspaces.delivery_diff(&self.source, &id)?;
+        let diff_truncated = diff.len() > 65536;
+        let tracked_diff = diff.chars().take(16384).collect();
+        let after = self.workspaces.inspect(&self.source, &id)?;
+        if after != inspection {
+            return Err(DevelopmentError::ValidatedSnapshotChanged);
+        }
+        Ok(DeliveryEvidence {
+            snapshot_id: inspection.snapshot_id,
+            source_plan_hash: plan.content_hash(),
+            source_revision: plan.storage_revision(),
+            changed_files: inspection.changed_files,
+            tracked_diff,
+            diff_truncated: diff_truncated || diff.chars().count() > 16384,
+            criteria,
+            current,
+        })
+    }
+
+    pub fn prepare_gate(
+        &self,
+        task_id: &str,
+        request_id: &str,
+        kind: OperationKind,
+    ) -> Result<GatePreparation, DevelopmentError> {
+        if !matches!(kind, OperationKind::Review | OperationKind::Complete) {
+            return Err(invalid("not a delivery gate"));
+        }
+        let lease = self.lease(task_id)?;
+        let mut state = self.status(task_id)?;
+        self.require_current(&state)?;
+        let evidence = self.delivery(task_id)?;
+        if !evidence.current {
+            return Err(DevelopmentError::ValidatedSnapshotChanged);
+        }
+        let inspection = self
+            .workspaces
+            .inspect(&self.source, &SessionId::new(state.run_id())?)?;
+        if inspection.snapshot_id != evidence.snapshot_id {
+            return Err(DevelopmentError::ValidatedSnapshotChanged);
+        }
+        let request = self.request(
+            &state,
+            task_id,
+            request_id,
+            kind,
+            inspection.snapshot_id.clone(),
+        )?;
+        if matches!(
+            state.reserve_operation(self.state_path(task_id)?, request)?,
+            OperationReservation::Recorded(_)
+        ) {
+            return Ok(GatePreparation::Recorded(Box::new(state)));
+        }
+        Ok(GatePreparation::Ready(Box::new(PreparedGate {
+            state,
+            inspection,
+            evidence,
+            task_id: task_id.into(),
+            request_id: request_id.into(),
+            kind,
+            _lease: lease,
+        })))
+    }
+
+    pub fn complete_gate(
+        &self,
+        mut prepared: PreparedGate,
+        approved_by: Option<&str>,
+    ) -> Result<DevelopmentState, DevelopmentError> {
+        self.require_current(&prepared.state)?;
+        let inspection = self
+            .workspaces
+            .inspect(&self.source, &SessionId::new(prepared.state.run_id())?)?;
+        if inspection != prepared.inspection {
+            return Err(DevelopmentError::ValidatedSnapshotChanged);
+        }
+        if let Some(approved_by) = approved_by {
+            if approved_by.trim().is_empty() {
+                return Err(DevelopmentError::ApprovalMismatch);
+            }
+            match prepared.kind {
+                OperationKind::Review => prepared.state.record_review(&inspection, ReviewDecision::Approved {
+                    summary: "Human reviewed exact delivery evidence, including any unmapped criteria".into() })?,
+                OperationKind::Complete => prepared.state.approve_completion(&inspection, CompletionApproval {
+                    run_id: prepared.state.run_id().into(), snapshot_id: inspection.snapshot_id.clone(), approved_by: approved_by.into() })?,
+                _ => return Err(invalid("not a delivery gate")),
+            }
+        }
+        prepared.state.finish_operation(
+            self.state_path(&prepared.task_id)?,
+            &prepared.request_id,
+            if approved_by.is_some() {
+                OperationStatus::Completed
+            } else {
+                OperationStatus::Failed
+            },
+        )?;
+        Ok(prepared.state)
+    }
+
     /// Fresh host inspection, not the last persisted PASS label.
     pub fn evidence_current(&self, task_id: &str) -> Result<bool, DevelopmentError> {
         let state = self.status(task_id)?;
@@ -70,7 +256,12 @@ impl ControllerService {
         let inspection = self
             .workspaces
             .inspect(&self.source, &SessionId::new(state.run_id())?)?;
-        Ok(run.passed
+        Ok(matches!(
+            state.stage(),
+            DevelopmentStage::Review
+                | DevelopmentStage::CompletionGate
+                | DevelopmentStage::Completed
+        ) && run.passed
             && run.snapshot_id == inspection.snapshot_id
             && state
                 .worktree()
@@ -459,7 +650,8 @@ impl ControllerService {
                 .last()
                 .is_none_or(|r| r.snapshot_id != inspection.snapshot_id)
             {
-                return Err(DevelopmentError::ValidatedSnapshotChanged);
+                state.invalidate_changed_snapshot(&inspection)?;
+                state.save(&path)?;
             }
         }
         let request = self.request(

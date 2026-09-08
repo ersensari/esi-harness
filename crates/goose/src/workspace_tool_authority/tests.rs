@@ -140,6 +140,14 @@ async fn controller_factory_requires_human_start_and_dispatches_real_validation(
         .unwrap();
     let result = future.await.unwrap().unwrap();
     assert_ne!(result.is_error, Some(true), "{result:?}");
+    let attachment = &result.meta.as_ref().unwrap().0
+        [crate::agents::extension_manager::TRUSTED_TOOL_UPDATE_META_KEY]["mcpApp"];
+    assert_eq!(attachment["extensionName"], "controller");
+    assert_eq!(attachment["resourceUri"], "ui://esi-development/run");
+    assert!(attachment["resourceResult"]["contents"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("delivery-evidence"));
     let parse = |result: CallToolResult| -> esi_development::DevelopmentState {
         assert_ne!(result.is_error, Some(true), "{result:?}");
         let value = serde_json::to_value(result).unwrap();
@@ -269,6 +277,63 @@ async fn controller_factory_requires_human_start_and_dispatches_real_validation(
     );
     assert_eq!(validated.stage(), esi_development::DevelopmentStage::Review);
     assert!(validated.validation_runs().last().unwrap().passed);
+    assert_eq!(
+        fixture
+            .call(
+                "controller__complete",
+                json!({"task_id":"T1", "request_id":"forged", "approved_by":"user"})
+            )
+            .await
+            .unwrap()
+            .is_error,
+        Some(true)
+    );
+    for (name, stage) in [
+        ("review", esi_development::DevelopmentStage::CompletionGate),
+        ("complete", esi_development::DevelopmentStage::Completed),
+    ] {
+        let mut context = fixture.ctx.clone();
+        context.tool_call_request_id = Some(uuid::Uuid::new_v4().to_string());
+        let mut pending = fixture
+            .manager
+            .dispatch_tool_call(
+                &context,
+                CallToolRequestParams::new(format!("controller__{name}"))
+                    .with_arguments(rmcp::object!({"task_id":"T1", "request_id":name})),
+                CancellationToken::new(),
+            )
+            .await
+            .unwrap();
+        let result = tokio::spawn(pending.result);
+        let message = tokio::time::timeout(
+            Duration::from_secs(10),
+            pending.action_required_stream.as_mut().unwrap().next(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let id = match &message.content[0] {
+            MessageContent::ActionRequired(action) => match &action.data {
+                ActionRequiredData::Elicitation { id, .. } => id,
+                _ => panic!(),
+            },
+            _ => panic!(),
+        };
+        fixture
+            .sessions
+            .action_required()
+            .claim_response(&fixture.ctx.session_id, id)
+            .await
+            .unwrap()
+            .submit(ElicitationOutcome::Accept(json!({"approve":true})))
+            .unwrap();
+        let response = result.await.unwrap().unwrap();
+        assert_eq!(
+            response.structured_content.as_ref().unwrap()["delivery"]["current"],
+            true
+        );
+        assert_eq!(parse(response).stage(), stage);
+    }
     assert!(fixture
         .call("write", json!({"path":"after-review.txt", "content":"bad"}))
         .await
@@ -536,8 +601,20 @@ impl Fixture {
             data.path().join("permissions"),
         ));
         let manager = Arc::new(
-            ExtensionManager::new_without_provider(data.path().into())
-                .with_managed_authority(true, permissions.clone()),
+            ExtensionManager::new(
+                Arc::new(Mutex::new(None)),
+                Arc::new(SessionManager::new(data.path().into())),
+                None,
+                "controller-fixture".into(),
+                crate::agents::extension_manager::ExtensionManagerCapabilities {
+                    mcpui: true,
+                    host_info: None,
+                    elicitation_handler: None,
+                    protocol_version: None,
+                },
+                false,
+            )
+            .with_managed_authority(true, permissions.clone()),
         );
         let sessions = manager.get_context().session_manager.clone();
         let session = sessions

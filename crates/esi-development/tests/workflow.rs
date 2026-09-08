@@ -119,6 +119,7 @@ fn transition_table_allows_only_declared_edges() {
         (Review, CompletionGate),
         (Review, HumanGate),
         (CompletionGate, Completed),
+        (CompletionGate, Diagnose),
         (CompletionGate, HumanGate),
     ];
     for from in stages {

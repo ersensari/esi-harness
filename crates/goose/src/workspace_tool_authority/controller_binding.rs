@@ -217,3 +217,29 @@ pub(crate) async fn resume(
     }
     Ok(state)
 }
+
+pub(crate) async fn commit_gate(
+    sessions: &SessionManager,
+    session_id: &str,
+    source: &Path,
+    service: ControllerService,
+    prepared: esi_development::PreparedGate,
+    approved: bool,
+) -> Result<DevelopmentState> {
+    let _guard = EXECUTION.lock().await;
+    ensure!(
+        sessions
+            .get_session(session_id, false)
+            .await?
+            .working_dir
+            .canonicalize()?
+            == source,
+        "Controller session workspace changed during delivery review"
+    );
+    require_receipt(source)?;
+    tokio::task::spawn_blocking(move || {
+        service.complete_gate(prepared, approved.then_some("desktop-user"))
+    })
+    .await?
+    .map_err(Into::into)
+}

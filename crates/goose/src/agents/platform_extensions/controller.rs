@@ -38,11 +38,11 @@ impl ControllerClient {
         Ok(Self { sessions: context.session_manager,
             info: InitializeResult::new(ServerCapabilities::builder().enable_tools().enable_resources().build())
                 .with_server_info(Implementation::new(EXTENSION_NAME, "1.0.0").with_title("ESI Controller"))
-                .with_instructions("Use approved workspace task IDs. Start requires exact human execution approval. Reuse request IDs only for retries of the same operation. Status is evidence, not a completion claim. Validate runs approved commands in the owned worktree with network denied. Resume reconciles interruption and routes failed validation to repair; it never silently reruns a validator.") })
+                .with_instructions("Use approved workspace task IDs. Start requires exact human execution approval. Reuse request IDs only for retries of the same operation. Status is evidence, not a completion claim. Validate runs approved commands in the owned worktree with network denied. Resume reconciles interruption and routes failed validation or stale snapshots to repair; it never silently reruns a validator. After validation passes, request human review, then human complete for the exact delivery snapshot. Unmapped criteria need human inspection. Never merge or publish automatically.") })
     }
 
     pub fn tools() -> Vec<Tool> {
-        ["start", "status", "validate", "resume"].into_iter().map(|name| {
+        ["start", "status", "validate", "resume", "review", "complete"].into_iter().map(|name| {
             let mut properties = json!({"task_id":{"type":"string","minLength":1,"maxLength":256}});
             let mut required = vec!["task_id"];
             if name != "status" {
@@ -79,7 +79,10 @@ impl ControllerClient {
             context.session_id.clone(),
         )?;
         ensure!(
-            matches!(name, "start" | "status" | "validate" | "resume"),
+            matches!(
+                name,
+                "start" | "status" | "validate" | "resume" | "review" | "complete"
+            ),
             "Unknown controller capability"
         );
         if name == "status" {
@@ -164,6 +167,43 @@ impl ControllerClient {
             )
             .await;
         }
+        if matches!(name, "review" | "complete") {
+            let interactive = context
+                .tool_call_request_id
+                .clone()
+                .context("Delivery requires interactive human approval")?;
+            let kind = if name == "review" {
+                esi_development::OperationKind::Review
+            } else {
+                esi_development::OperationKind::Complete
+            };
+            let worker = service.clone();
+            let prepared = tokio::task::spawn_blocking(move || {
+                worker.prepare_gate(&input.task_id, &request_id, kind)
+            })
+            .await??;
+            let prepared = match prepared {
+                esi_development::GatePreparation::Recorded(state) => return Ok(*state),
+                esi_development::GatePreparation::Ready(prepared) => prepared,
+            };
+            let bridge = self.sessions.action_required();
+            let response = tokio::select! {
+                _ = cancellation.cancelled() => None,
+                result = bridge.request_and_wait(context.session_id.clone(), interactive,
+                    format!("Human {name}: inspect this exact delivery snapshot. Unmapped criteria require your own review; tracked diff excludes untracked file content. No merge, push or publication.\n{}", serde_json::to_string_pretty(prepared.evidence())?),
+                    json!({"type":"object","properties":{"approve":{"type":"boolean","description":"Approve this exact delivery evidence"}},"required":["approve"],"additionalProperties":false}), Duration::from_secs(300)) => Some(result),
+            };
+            let approved = matches!(response, Some(Ok(crate::action_required_manager::ElicitationOutcome::Accept(ref v))) if v == &json!({"approve":true}));
+            return crate::workspace_tool_authority::controller_binding::commit_gate(
+                &self.sessions,
+                &context.session_id,
+                &root,
+                service,
+                *prepared,
+                approved,
+            )
+            .await;
+        }
         let control = ValidationControl::default();
         let worker_control = control.clone();
         let mut worker = tokio::task::spawn_blocking(move || {
@@ -219,17 +259,19 @@ impl McpClientTrait for ControllerClient {
                 if let (Some(task), Ok(session)) =
                     (task_id, sessions.get_session(&session_id, false).await)
                 {
-                    view.evidence_current = tokio::task::spawn_blocking(move || {
+                    let delivery = tokio::task::spawn_blocking(move || {
                         ControllerService::new(
                             session.working_dir,
                             sessions.controller_data_dir(),
                             session_id,
                         )
-                        .and_then(|s| s.evidence_current(&task))
+                        .and_then(|s| s.delivery(&task))
                     })
                     .await
                     .ok()
                     .and_then(Result::ok);
+                    view.evidence_current = delivery.as_ref().map(|d| d.current);
+                    view.delivery = delivery.and_then(|d| serde_json::to_value(d).ok());
                 }
                 let mut result =
                     CallToolResult::structured(serde_json::to_value(view).expect("typed view"));

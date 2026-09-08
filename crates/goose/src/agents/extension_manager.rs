@@ -1985,6 +1985,26 @@ impl ExtensionManager {
         *self.tools_cache.lock().await = None;
     }
 
+    async fn finalize_dispatched_result(
+        mut result: CallToolResult,
+        hydrate: bool,
+        client: &McpClientBox,
+        session_id: &str,
+        resolved_tool: &ResolvedTool,
+        cancellation: CancellationToken,
+    ) -> CallToolResult {
+        remove_untrusted_mcp_app_meta(&mut result);
+        if hydrate && result.is_error != Some(true) {
+            if let Some(attachment) =
+                Self::hydrate_mcp_app_attachment(client, session_id, resolved_tool, cancellation)
+                    .await
+            {
+                insert_trusted_tool_update_meta(&mut result, &attachment);
+            }
+        }
+        result
+    }
+
     async fn fetch_all_tools(&self, session_id: &str) -> ExtensionResult<Vec<Tool>> {
         let clients: Vec<_> = self
             .extensions
@@ -2543,7 +2563,7 @@ impl ExtensionManager {
                     || (resolved_tool.extension_name == "workspaceplan"
                         && actual_tool_name == "approve")
                 {
-                    return crate::workspace_tool_authority::execute(
+                    let result = crate::workspace_tool_authority::execute(
                         authority,
                         &authority_sessions,
                         &owned_ctx,
@@ -2559,7 +2579,16 @@ impl ExtensionManager {
                             format!("ESI authority: {error}"),
                             None,
                         )
-                    });
+                    })?;
+                    return Ok(Self::finalize_dispatched_result(
+                        result,
+                        should_hydrate_mcp_app,
+                        &hydration_client,
+                        &session_id,
+                        &resolved_tool,
+                        read_cancellation_token,
+                    )
+                    .await);
                 }
             }
             tracing::debug!(
@@ -2578,24 +2607,15 @@ impl ExtensionManager {
                     }
                 });
 
-            let mut result = call_result?;
-
-            remove_untrusted_mcp_app_meta(&mut result);
-
-            if should_hydrate_mcp_app && result.is_error != Some(true) {
-                if let Some(attachment) = Self::hydrate_mcp_app_attachment(
-                    &hydration_client,
-                    &session_id,
-                    &resolved_tool,
-                    read_cancellation_token,
-                )
-                .await
-                {
-                    insert_trusted_tool_update_meta(&mut result, &attachment);
-                }
-            }
-
-            Ok(result)
+            Ok(Self::finalize_dispatched_result(
+                call_result?,
+                should_hydrate_mcp_app,
+                &hydration_client,
+                &session_id,
+                &resolved_tool,
+                read_cancellation_token,
+            )
+            .await)
         };
 
         Ok(ToolCallResult {

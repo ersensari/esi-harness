@@ -78,6 +78,21 @@ it('renders actual bundled Canvas scope safely with accessible read-only details
               ],
               recovery_message: 'Interrupted is not PASS; resume never replays validators.',
               evidence_current: false,
+              delivery: {
+                snapshot_id: 'delivery-hash',
+                source_revision: 4,
+                source_plan_hash: 'scope-hash',
+                changed_files: ['result.txt'],
+                tracked_diff: '+fixed <img src=x>',
+                diff_truncated: true,
+                criteria: [
+                  {
+                    criterion: 'AC1: result',
+                    validators: ['test'],
+                    covered_by_current_required_tests: false,
+                  },
+                ],
+              },
             },
           },
         },
@@ -93,6 +108,13 @@ it('renders actual bundled Canvas scope safely with accessible read-only details
   expect(panel.textContent).toContain('Affected tasks: T1');
   expect(panel.querySelector('summary')).not.toBeNull();
   expect(document.querySelector('img')).toBeNull();
+  expect(document.getElementById('delivery-evidence')!.textContent).toContain('delivery-hash');
+  expect(document.getElementById('delivery-evidence')!.textContent).toContain(
+    'manual review required'
+  );
+  expect(document.getElementById('delivery-evidence')!.textContent).toContain(
+    'Diff preview is truncated'
+  );
   expect(document.getElementById('operations')!.textContent).toContain('interrupted');
   expect(document.getElementById('operations')!.textContent).toContain('validate · v1');
   expect(document.getElementById('recovery-message')!.textContent).toContain('never replays');

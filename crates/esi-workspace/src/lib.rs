@@ -262,6 +262,22 @@ impl WorkspaceManager {
         self.resume(source_repository, session_id)
     }
 
+    /// Bounded tracked diff against the run base; untracked names remain in
+    /// WorktreeInspection and are not mislabeled as included in this patch.
+    pub fn delivery_diff(&self, source: &Path, session: &SessionId) -> Result<String> {
+        let inspection = self.inspect(source, session)?;
+        git_stdout(
+            &inspection.record.identity.worktree_path,
+            [
+                "diff",
+                "--no-ext-diff",
+                "--no-textconv",
+                &inspection.record.identity.base_commit,
+                "--",
+            ],
+        )
+    }
+
     pub fn recover(
         &self,
         source_repository: impl AsRef<Path>,

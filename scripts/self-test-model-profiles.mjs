@@ -24,6 +24,7 @@ const phaseTitles = {
   'controller-tools': 'ESI Controller Tools',
   'controller-binding': 'ESI Controller Binding',
   'controller-resume': 'ESI Controller Resume',
+  'controller-delivery': 'ESI Controller Delivery',
 };
 assert(Object.hasOwn(phaseTitles, phase));
 const phaseTitle = phaseTitles[phase];
@@ -32,7 +33,7 @@ const root = await mkdtemp(join(tmpdir(), 'forgeloop-ai-profile-selftest-'));
 const artifacts = join(root, 'artifacts');
 await mkdir(artifacts);
 await mkdir(join(root, 'config/custom_providers'), { recursive: true });
-const commands = phase === 'controller-resume' ? [
+const commands = ['controller-resume', 'controller-delivery'].includes(phase) ? [
   'node scripts/test-isolated.mjs cargo test --locked -p esi-development -p esi-development-visualizer -- --quiet',
   'node scripts/test-isolated.mjs cargo test --locked -p goose --lib controller_factory -- --quiet',
   'node scripts/test-isolated.mjs cargo test --locked -p goose --lib authority_acp_app -- --quiet',

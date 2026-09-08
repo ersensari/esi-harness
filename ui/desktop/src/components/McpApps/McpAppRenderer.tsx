@@ -1225,8 +1225,10 @@ export default function McpAppRenderer({
                 const value = await callMcpAppTool(
                   sessionId,
                   extensionName,
-                  'show_development_loop',
-                  toolInput?.arguments
+                  extensionName === 'controller' ? 'status' : 'show_development_loop',
+                  extensionName === 'controller'
+                    ? { task_id: toolInput?.arguments?.task_id }
+                    : toolInput?.arguments
                 );
                 if (value.isError || !value.structuredContent?.workspace_plan)
                   throw new Error('Snapshot unavailable');

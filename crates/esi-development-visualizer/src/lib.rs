@@ -200,6 +200,7 @@ pub struct WorkspacePlanView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct DevelopmentLoopView {
+    pub delivery: Option<serde_json::Value>,
     pub operations: Vec<serde_json::Value>,
     pub recovery_message: Option<String>,
     pub evidence_current: Option<bool>,
@@ -229,6 +230,7 @@ struct FingerprintDetails {
 impl DevelopmentLoopView {
     pub fn empty() -> Self {
         Self {
+            delivery: None,
             operations: Vec::new(),
             recovery_message: None,
             evidence_current: None,
@@ -277,6 +279,7 @@ impl DevelopmentLoopView {
         let workspace_snapshot = inspect_workspace(&workspace)?;
 
         Ok(Self {
+            delivery: None,
             operations: Vec::new(),
             recovery_message: None,
             evidence_current: None,
@@ -412,6 +415,7 @@ impl DevelopmentLoopView {
             .and_then(|binding| inspect_workspace(&binding.identity.worktree_path).ok());
         Self {
             source: "controller_state".to_string(),
+            delivery: None,
             operations: state.operations().values().map(|r| serde_json::to_value(r).expect("typed operation")).collect(),
             recovery_message: state.operations().values().any(|r| matches!(r.status,
                 esi_development::OperationStatus::Started | esi_development::OperationStatus::Interrupted))

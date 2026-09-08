@@ -54,6 +54,16 @@ parameters:
     description: "Clean up test artifacts after completion"
 
 instructions: |
+  {% if test_phases == "all" or "controller-delivery" in test_phases %}
+  ### ESI Controller Delivery
+  Run `node scripts/test-isolated.mjs cargo test --locked -p esi-development -p esi-development-visualizer`.
+  Run `node scripts/test-isolated.mjs cargo test --locked -p goose --lib controller_factory`.
+  Run `node scripts/test-isolated.mjs cargo test --locked -p goose --lib authority_acp_app`.
+  Verify failed validation cannot be reviewed, repair requires actual passing
+  evidence, stale completion is rejected, and only exact human delivery approval
+  completes the task. Do not merge or publish automatically.
+  {% endif %}
+
   {% if test_phases == "all" or "controller-resume" in test_phases %}
   ### ESI Controller Resume
   Run `node scripts/test-isolated.mjs cargo test --locked -p esi-development -p esi-development-visualizer`.

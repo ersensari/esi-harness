@@ -14,11 +14,17 @@ const [executable, reportPath, loop = 'legacy', mode = 'manual'] = process.argv.
 const discovery = mode === 'discovery';
 const trust = mode === 'trust';
 const planning = mode === 'planning';
+const controller = mode === 'controller';
+let controllerFixture;
 const restricted = mode === 'restricted-discovery';
 assert(executable?.startsWith('/') && reportPath?.startsWith('/'));
 const root = await mkdtemp(join(tmpdir(), 'forgeloop-ai-model-profiles-'));
 const gooseRoot = join(root, 'goose'), profile = join(root, 'desktop'), workspace = join(root, 'workspace');
 for (const path of [join(gooseRoot, 'config/custom_providers'), profile, workspace, join(root, 'tmp')]) await mkdir(path, { recursive: true });
+if (controller) {
+  const { controllerFixtureTools } = await import('./controller-acceptance.mjs');
+  controllerFixture = controllerFixtureTools(workspace);
+}
 if (trust) await writeFile(join(root, 'outside.txt'), 'POST147_OUTSIDE_WORKSPACE');
 const captures = [], checks = [];
 let app, browser, success = false;
@@ -53,6 +59,11 @@ const server = createServer(async (req, res) => {
   captures.push(body);
   if (JSON.stringify(body.messages).includes('POST141 busy')) await delay(1500);
   const message = { role: 'assistant', content: 'POST141 OK', ...(body.enable_thinking ? { reasoning_content: 'fixture reasoning' } : {}) };
+  if (controller && body.messages.at(-1)?.role === 'user') {
+    const text = JSON.stringify(body.messages.at(-1));
+    const entry = Object.entries(controllerFixture).find(([key]) => text.includes(`M18005 ${key}`));
+    if (entry) { const [key, tool] = entry; message.content = null; message.tool_calls = [{ id: `controller-${key}`, type: 'function', function: { name: tool.name, arguments: JSON.stringify(tool.arguments) } }]; }
+  }
   if (trust && body.messages.at(-1)?.role === 'user') {
     const shell = JSON.stringify(body.messages.at(-1)).includes('POST147 shell');
     message.content = null;
@@ -81,8 +92,9 @@ await writeFile(join(gooseRoot, 'config/custom_providers/custom_profile_fixture.
 }));
 await writeFile(join(gooseRoot, 'config/config.yaml'), JSON.stringify({
   GOOSE_PROVIDER: 'custom_profile_fixture', GOOSE_MODEL: 'manual', GOOSE_DISABLE_KEYRING: true,
-  GOOSE_TELEMETRY_ENABLED: false, GOOSE_MODE: trust || planning ? 'auto' : 'chat',
-  extensions: planning ? {
+  GOOSE_TELEMETRY_ENABLED: false, GOOSE_MODE: trust || planning || controller ? 'auto' : 'chat',
+  extensions: planning || controller ? {
+    ...(controller ? { controller: { type: 'platform', name: 'controller', enabled: true } } : {}),
     developer: { type: 'platform', name: 'developer', enabled: true },
     workspaceplan: { type: 'platform', name: 'workspaceplan', enabled: true },
     'esi-development-visualizer': { type: 'builtin', name: 'esi-development-visualizer', enabled: true },
@@ -151,7 +163,10 @@ async function send(page, text) {
 }
 try {
   let page = await launch();
-  if (planning) {
+  if (controller) {
+    const { acceptController } = await import('./controller-acceptance.mjs');
+    await acceptController({ page, rpc, workspace, root, pass, until, captures });
+  } else if (planning) {
     const { acceptPlanning } = await import('./planning-acceptance.mjs');
     await acceptPlanning({ page, rpc, workspace, root, pass, until });
   } else if (restricted) {
@@ -309,6 +324,7 @@ try {
   success = true;
 } catch (error) {
   console.error(String(error));
+  if (controller) console.error(JSON.stringify(captures.slice(-2).map(body => body.messages.filter(m => m.role === 'tool').map(m => JSON.stringify(m).slice(0, 1600)))));
   process.exitCode = 1;
   if (browser) { const page = browser.contexts().flatMap(c => c.pages())[0]; if (page) await page.screenshot({ path: `${reportPath}.png` }).catch(() => {}); }
 } finally {

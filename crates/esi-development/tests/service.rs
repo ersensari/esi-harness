@@ -41,6 +41,23 @@ impl Fixture {
             }],
         )
         .unwrap();
+        plan.set_task_contracts(std::collections::BTreeMap::from([(
+            "T1".into(),
+            esi_workspace_plan::TaskContract {
+                acceptance_criteria: vec![esi_workspace_plan::TaskAcceptanceCriterion {
+                    id: "AC1".into(),
+                    description: "result equals fixed".into(),
+                    requirement_id: Some("R1".into()),
+                }],
+                validation_expectations: vec![esi_workspace_plan::TaskValidationExpectation {
+                    id: "test".into(),
+                    description: "Check result file".into(),
+                    criterion_ids: vec!["AC1".into()],
+                }],
+                ..Default::default()
+            },
+        )]))
+        .unwrap();
         plan.approve("fixture-human").unwrap();
         plan.save(&source).unwrap();
         let service =
@@ -164,10 +181,12 @@ fn resume_refuses_changed_snapshot_instead_of_reusing_historical_pass() {
     )
     .unwrap();
     assert!(!fixture.service.evidence_current("T1").unwrap());
-    assert!(matches!(
-        fixture.service.resume("T1", "stale"),
-        Err(DevelopmentError::ValidatedSnapshotChanged)
-    ));
+    let resumed = fixture.service.resume("T1", "stale").unwrap();
+    assert_eq!(resumed.stage(), DevelopmentStage::Repair);
+    assert!(fixture
+        .service
+        .prepare_gate("T1", "review-stale", OperationKind::Review)
+        .is_err());
 }
 
 #[test]
@@ -210,6 +229,10 @@ fn real_service_start_replay_failure_repair_and_main_preservation() {
         .unwrap();
     assert_eq!(failed.stage(), DevelopmentStage::Diagnose);
     assert!(!failed.validation_runs()[0].passed);
+    assert!(fixture
+        .service
+        .prepare_gate("T1", "review-failed", OperationKind::Review)
+        .is_err());
     let resumed = fixture.service.resume("T1", "resume1").unwrap();
     assert_eq!(resumed.stage(), DevelopmentStage::Repair);
     fs::write(worktree.join("result.txt"), "fixed\n").unwrap();
@@ -224,6 +247,82 @@ fn real_service_start_replay_failure_repair_and_main_preservation() {
         .validate("T1", "v2", &ValidationControl::default())
         .unwrap();
     assert_eq!(replay, passed);
+    let delivery = fixture.service.delivery("T1").unwrap();
+    assert!(delivery.current);
+    assert!(delivery.tracked_diff.contains("+fixed"));
+    assert!(delivery.criteria[0].covered_by_current_required_tests);
+    assert_eq!(delivery.criteria[0].validators, vec!["test"]);
+    let GatePreparation::Ready(review) = fixture
+        .service
+        .prepare_gate("T1", "review", OperationKind::Review)
+        .unwrap()
+    else {
+        panic!();
+    };
+    let reviewed = fixture
+        .service
+        .complete_gate(*review, Some("fixture-human"))
+        .unwrap();
+    assert_eq!(reviewed.stage(), DevelopmentStage::CompletionGate);
+    let GatePreparation::Ready(complete) = fixture
+        .service
+        .prepare_gate("T1", "complete-stale", OperationKind::Complete)
+        .unwrap()
+    else {
+        panic!();
+    };
+    fs::write(worktree.join("result.txt"), "changed-after-review\n").unwrap();
+    assert!(matches!(
+        fixture
+            .service
+            .complete_gate(*complete, Some("fixture-human")),
+        Err(DevelopmentError::ValidatedSnapshotChanged)
+    ));
+    let repaired = fixture
+        .service
+        .resume("T1", "resume-stale-completion")
+        .unwrap();
+    assert_eq!(repaired.stage(), DevelopmentStage::Repair);
+    assert_eq!(
+        repaired.operations()["complete-stale"].status,
+        OperationStatus::Interrupted
+    );
+    fs::write(worktree.join("result.txt"), "fixed\n").unwrap();
+    assert!(!fixture.service.evidence_current("T1").unwrap());
+    fixture
+        .service
+        .validate("T1", "v3", &ValidationControl::default())
+        .unwrap();
+    let GatePreparation::Ready(review) = fixture
+        .service
+        .prepare_gate("T1", "review2", OperationKind::Review)
+        .unwrap()
+    else {
+        panic!();
+    };
+    fixture
+        .service
+        .complete_gate(*review, Some("fixture-human"))
+        .unwrap();
+    let GatePreparation::Ready(complete) = fixture
+        .service
+        .prepare_gate("T1", "complete", OperationKind::Complete)
+        .unwrap()
+    else {
+        panic!();
+    };
+    let completed = fixture
+        .service
+        .complete_gate(*complete, Some("fixture-human"))
+        .unwrap();
+    assert_eq!(completed.stage(), DevelopmentStage::Completed);
+    assert!(matches!(
+        fixture
+            .service
+            .prepare_gate("T1", "complete", OperationKind::Complete)
+            .unwrap(),
+        GatePreparation::Recorded(_)
+    ));
     assert_eq!(
         fs::read_to_string(fixture.source.join("result.txt")).unwrap(),
         "broken\n"
