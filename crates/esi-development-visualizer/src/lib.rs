@@ -200,6 +200,9 @@ pub struct WorkspacePlanView {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 pub struct DevelopmentLoopView {
+    pub operations: Vec<serde_json::Value>,
+    pub recovery_message: Option<String>,
+    pub evidence_current: Option<bool>,
     pub source: String,
     pub status: VisualizerStatus,
     pub run_id: Option<String>,
@@ -226,6 +229,9 @@ struct FingerprintDetails {
 impl DevelopmentLoopView {
     pub fn empty() -> Self {
         Self {
+            operations: Vec::new(),
+            recovery_message: None,
+            evidence_current: None,
             source: "empty".to_string(),
             status: VisualizerStatus::Empty,
             run_id: None,
@@ -271,6 +277,9 @@ impl DevelopmentLoopView {
         let workspace_snapshot = inspect_workspace(&workspace)?;
 
         Ok(Self {
+            operations: Vec::new(),
+            recovery_message: None,
+            evidence_current: None,
             source: "live_workspace".to_string(),
             status,
             run_id: None,
@@ -403,6 +412,11 @@ impl DevelopmentLoopView {
             .and_then(|binding| inspect_workspace(&binding.identity.worktree_path).ok());
         Self {
             source: "controller_state".to_string(),
+            operations: state.operations().values().map(|r| serde_json::to_value(r).expect("typed operation")).collect(),
+            recovery_message: state.operations().values().any(|r| matches!(r.status,
+                esi_development::OperationStatus::Started | esi_development::OperationStatus::Interrupted))
+                .then(|| "Started may still be running; resume obtains the task lease before reconciliation. Interrupted is not PASS and validators are never replayed automatically.".into()),
+            evidence_current: None,
             status,
             run_id: Some(state.run_id().to_string()),
             objective: state.brief().map(|brief| brief.objective.clone()),

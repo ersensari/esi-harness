@@ -60,6 +60,27 @@ impl ManagedWorktreeLease {
 }
 
 impl ControllerService {
+    /// Fresh host inspection, not the last persisted PASS label.
+    pub fn evidence_current(&self, task_id: &str) -> Result<bool, DevelopmentError> {
+        let state = self.status(task_id)?;
+        self.require_current(&state)?;
+        let Some(run) = state.validation_runs().last() else {
+            return Ok(false);
+        };
+        let inspection = self
+            .workspaces
+            .inspect(&self.source, &SessionId::new(state.run_id())?)?;
+        Ok(run.passed
+            && run.snapshot_id == inspection.snapshot_id
+            && state
+                .worktree()
+                .is_some_and(|w| w.identity == inspection.record.identity)
+            && !state
+                .operations()
+                .values()
+                .any(|r| r.status == OperationStatus::Started))
+    }
+
     pub fn lease_implementation(
         &self,
         task_id: &str,
@@ -427,8 +448,19 @@ impl ControllerService {
             state.finish_operation(&path, &id, OperationStatus::Interrupted)?;
         }
         if state.worktree().is_some() {
-            self.workspaces
+            let inspection = self
+                .workspaces
                 .inspect(&self.source, &SessionId::new(state.run_id())?)?;
+            if matches!(
+                state.stage(),
+                DevelopmentStage::Review | DevelopmentStage::CompletionGate
+            ) && state
+                .validation_runs()
+                .last()
+                .is_none_or(|r| r.snapshot_id != inspection.snapshot_id)
+            {
+                return Err(DevelopmentError::ValidatedSnapshotChanged);
+            }
         }
         let request = self.request(
             &state,

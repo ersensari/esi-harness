@@ -63,6 +63,21 @@ it('renders actual bundled Canvas scope safely with accessible read-only details
               repair_budgets: [],
               approvals: [],
               events: [],
+              operations: [
+                {
+                  request: {
+                    kind: 'validate',
+                    request_id: 'v1',
+                    task_id: 'T1',
+                    expected_snapshot: '<img src=x>',
+                  },
+                  status: 'interrupted',
+                  started_stage: 'implement',
+                  result_stage: 'implement',
+                },
+              ],
+              recovery_message: 'Interrupted is not PASS; resume never replays validators.',
+              evidence_current: false,
             },
           },
         },
@@ -78,6 +93,12 @@ it('renders actual bundled Canvas scope safely with accessible read-only details
   expect(panel.textContent).toContain('Affected tasks: T1');
   expect(panel.querySelector('summary')).not.toBeNull();
   expect(document.querySelector('img')).toBeNull();
+  expect(document.getElementById('operations')!.textContent).toContain('interrupted');
+  expect(document.getElementById('operations')!.textContent).toContain('validate · v1');
+  expect(document.getElementById('recovery-message')!.textContent).toContain('never replays');
+  expect(document.getElementById('evidence-freshness')!.textContent).toContain(
+    'Historical PASS is not current approval'
+  );
   expect(
     post.mock.calls.every(
       (call) => !String((call[0] as { method?: string }).method).includes('plan-review')

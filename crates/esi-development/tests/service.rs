@@ -88,6 +88,89 @@ fn policy(script: &str) -> ValidationPlan {
 }
 
 #[test]
+fn crash_validation_child() {
+    let Some(root) = std::env::var_os("ESI_CRASH_FIXTURE_ROOT") else {
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let service =
+        ControllerService::new(root.join("source"), root.join("host"), "session".into()).unwrap();
+    service
+        .validate("T1", "crashed-validation", &ValidationControl::default())
+        .unwrap();
+    panic!("parent must kill the validation process");
+}
+
+#[test]
+fn killed_process_resumes_same_task_without_partial_pass_or_replay() {
+    let fixture = Fixture::new();
+    let state = fixture
+        .start("touch ready; while test ! -f release; do sleep 0.02; done; touch forbidden-replay");
+    let path = state.worktree().unwrap().identity.worktree_path.clone();
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", "crash_validation_child", "--nocapture"])
+        .env("ESI_CRASH_FIXTURE_ROOT", fixture.root.path())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !path.join("ready").exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    let ready = path.join("ready").exists();
+    child.kill().unwrap();
+    child.wait().unwrap();
+    assert!(ready, "contained validator must actually start");
+    let service = ControllerService::new(
+        &fixture.source,
+        fixture.root.path().join("host"),
+        "session".into(),
+    )
+    .unwrap();
+    let restored = service.resume("T1", "resume-crashed").unwrap();
+    assert_eq!(restored.run_id(), state.run_id());
+    assert_eq!(restored.worktree(), state.worktree());
+    assert_eq!(restored.stage(), DevelopmentStage::Implement);
+    assert_eq!(
+        restored.operations()["crashed-validation"].status,
+        OperationStatus::Interrupted
+    );
+    assert!(restored.validation_runs().is_empty());
+    assert!(!service.evidence_current("T1").unwrap());
+    fs::write(path.join("release"), "release").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(150));
+    assert!(!path.join("forbidden-replay").exists());
+    assert!(!fixture.source.join("ready").exists());
+}
+
+#[test]
+fn resume_refuses_changed_snapshot_instead_of_reusing_historical_pass() {
+    let fixture = Fixture::new();
+    let state = fixture.start("true");
+    fixture
+        .service
+        .validate("T1", "v1", &ValidationControl::default())
+        .unwrap();
+    assert!(fixture.service.evidence_current("T1").unwrap());
+    fs::write(
+        state
+            .worktree()
+            .unwrap()
+            .identity
+            .worktree_path
+            .join("result.txt"),
+        "changed",
+    )
+    .unwrap();
+    assert!(!fixture.service.evidence_current("T1").unwrap());
+    assert!(matches!(
+        fixture.service.resume("T1", "stale"),
+        Err(DevelopmentError::ValidatedSnapshotChanged)
+    ));
+}
+
+#[test]
 fn real_service_start_replay_failure_repair_and_main_preservation() {
     let fixture = Fixture::new();
     let script = "test \"$(cat result.txt)\" = fixed";

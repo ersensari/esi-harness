@@ -218,6 +218,46 @@ async fn controller_factory_requires_human_start_and_dispatches_real_validation(
         .is_err());
     let replay = parse(fixture.call("controller__start", args).await.unwrap());
     assert_eq!(replay, state);
+    Config::global()
+        .delete(
+            &controller_binding::session_key(&fixture.sessions, &fixture.ctx.session_id).unwrap(),
+        )
+        .unwrap();
+    assert!(fixture
+        .call(
+            "write",
+            json!({"path":"missing-binding.txt", "content":"bad"})
+        )
+        .await
+        .is_err());
+    let restored = fixture
+        .call(
+            "controller__resume",
+            json!({"task_id":"T1", "request_id":"restore-binding"}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        restored.structured_content.as_ref().unwrap()["operations"]
+            .as_array()
+            .unwrap()
+            .len(),
+        2
+    );
+    assert_eq!(parse(restored).run_id(), state.run_id());
+    assert_ne!(
+        fixture
+            .call(
+                "write",
+                json!({"path":"restored.txt", "content":"restored"})
+            )
+            .await
+            .unwrap()
+            .is_error,
+        Some(true)
+    );
+    assert!(owned.join("restored.txt").exists());
+    assert!(!fixture.root.path().join("restored.txt").exists());
     let validated = parse(
         fixture
             .call(

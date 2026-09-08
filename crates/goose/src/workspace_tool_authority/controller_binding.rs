@@ -33,7 +33,7 @@ fn key(scope: &str, value: &impl Serialize) -> Result<String> {
         .collect();
     Ok(format!("ESI_CONTROLLER_{scope}_{hash}"))
 }
-fn session_key(sessions: &SessionManager, session: &str) -> Result<String> {
+pub(super) fn session_key(sessions: &SessionManager, session: &str) -> Result<String> {
     key("SESSION", &(data_root(sessions)?, session))
 }
 fn workspace_key(sessions: &SessionManager, source: &Path) -> Result<String> {
@@ -166,4 +166,54 @@ pub(crate) async fn managed_worktree(
         })
         .await??,
     ))
+}
+
+/// Reconcile a host-owned run after process interruption. A workspace mode
+/// receipt plus a completed human-approved Start is required to restore routing.
+pub(crate) async fn resume(
+    sessions: &SessionManager,
+    session_id: &str,
+    source: &Path,
+    task_id: String,
+    request_id: String,
+) -> Result<DevelopmentState> {
+    let _guard = EXECUTION.lock().await;
+    ensure!(
+        sessions
+            .get_session(session_id, false)
+            .await?
+            .working_dir
+            .canonicalize()?
+            == source,
+        "Controller session workspace changed"
+    );
+    let plan = require_receipt(source)?;
+    check_start(sessions, session_id, source, &task_id)?;
+    let service = ControllerService::new(source, data_root(sessions)?, session_id.into())?;
+    let task = task_id.clone();
+    let state = tokio::task::spawn_blocking(move || service.resume(&task, &request_id)).await??;
+    if state.worktree().is_some() {
+        ensure!(
+            optional::<bool>(&workspace_key(sessions, source)?)? == Some(true),
+            "Missing host execution-mode receipt; cannot restore controller binding"
+        );
+        ensure!(state.operations().values().any(|r| r.request.kind == esi_development::OperationKind::Start
+            && r.status == esi_development::OperationStatus::Completed)
+            && state.events().iter().any(|e| matches!(&e.event,
+                esi_development::DevelopmentEventKind::HumanApprovalRecorded { gate, .. } if gate == "worktree_ready")),
+            "Missing completed human-approved start; cannot restore controller binding");
+        Config::global().set_param(
+            &session_key(sessions, session_id)?,
+            Binding {
+                session_id: session_id.into(),
+                task_id,
+                run_id: state.run_id().into(),
+                source: source.into(),
+                data_root: data_root(sessions)?,
+                plan_hash: plan.content_hash(),
+                plan_revision: plan.storage_revision(),
+            },
+        )?;
+    }
+    Ok(state)
 }

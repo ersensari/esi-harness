@@ -36,7 +36,7 @@ struct Input {
 impl ControllerClient {
     pub fn new(context: PlatformExtensionContext) -> anyhow::Result<Self> {
         Ok(Self { sessions: context.session_manager,
-            info: InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
+            info: InitializeResult::new(ServerCapabilities::builder().enable_tools().enable_resources().build())
                 .with_server_info(Implementation::new(EXTENSION_NAME, "1.0.0").with_title("ESI Controller"))
                 .with_instructions("Use approved workspace task IDs. Start requires exact human execution approval. Reuse request IDs only for retries of the same operation. Status is evidence, not a completion claim. Validate runs approved commands in the owned worktree with network denied. Resume reconciles interruption and routes failed validation to repair; it never silently reruns a validator.") })
     }
@@ -60,6 +60,7 @@ impl ControllerClient {
             Tool::new(name, format!("ESI controller {name}: persisted task-scoped operation, never model-supplied success."),
                 json!({"type":"object","properties":properties,"required":required,"additionalProperties":false}).as_object().unwrap().clone())
                 .annotate(ToolAnnotations::from_raw(None, Some(name == "status"), Some(false), Some(true), Some(false)))
+                .with_meta(controller_ui_meta())
         }).collect()
     }
 
@@ -154,11 +155,14 @@ impl ControllerClient {
             "Only start accepts validation commands"
         );
         if name == "resume" {
-            return tokio::task::spawn_blocking(move || {
-                service.resume(&input.task_id, &request_id)
-            })
-            .await?
-            .map_err(Into::into);
+            return crate::workspace_tool_authority::controller_binding::resume(
+                &self.sessions,
+                &context.session_id,
+                &root,
+                input.task_id,
+                request_id,
+            )
+            .await;
         }
         let control = ValidationControl::default();
         let worker_control = control.clone();
@@ -194,15 +198,46 @@ impl McpClientTrait for ControllerClient {
         arguments: Option<JsonObject>,
         cancellation: CancellationToken,
     ) -> Result<CallToolResult, Error> {
+        let task_id = arguments
+            .as_ref()
+            .and_then(|a| a.get("task_id"))
+            .and_then(Value::as_str)
+            .map(str::to_owned);
         let result =
             match serde_json::from_value::<Input>(Value::Object(arguments.unwrap_or_default())) {
                 Ok(input) => self.execute(context, name, input, cancellation).await,
                 Err(error) => Err(error.into()),
             };
         Ok(match result {
-            Ok(state) => CallToolResult::success(vec![ContentBlock::text(
-                serde_json::to_string(&state).expect("typed state serializes"),
-            )]),
+            Ok(state) => {
+                let sessions = self.sessions.clone();
+                let session_id = context.session_id.clone();
+                let mut view = esi_development_visualizer::DevelopmentLoopView::from_state(&state);
+                // Controller's resource is an evidence panel, not the separate
+                // visualizer's file-reading tool surface.
+                view.workspace = None;
+                if let (Some(task), Ok(session)) =
+                    (task_id, sessions.get_session(&session_id, false).await)
+                {
+                    view.evidence_current = tokio::task::spawn_blocking(move || {
+                        ControllerService::new(
+                            session.working_dir,
+                            sessions.controller_data_dir(),
+                            session_id,
+                        )
+                        .and_then(|s| s.evidence_current(&task))
+                    })
+                    .await
+                    .ok()
+                    .and_then(Result::ok);
+                }
+                let mut result =
+                    CallToolResult::structured(serde_json::to_value(view).expect("typed view"));
+                result.content = vec![ContentBlock::text(
+                    serde_json::to_string(&state).expect("typed state serializes"),
+                )];
+                result.with_meta(Some(controller_ui_meta()))
+            }
             Err(error) => {
                 CallToolResult::error(vec![ContentBlock::text(format!("Controller: {error}"))])
             }
@@ -211,4 +246,50 @@ impl McpClientTrait for ControllerClient {
     fn get_info(&self) -> Option<&InitializeResult> {
         Some(&self.info)
     }
+
+    async fn list_resources(
+        &self,
+        _session: &str,
+        _cursor: Option<String>,
+        _cancel: CancellationToken,
+    ) -> Result<rmcp::model::ListResourcesResult, Error> {
+        Ok(rmcp::model::ListResourcesResult {
+            resources: vec![rmcp::model::Resource::new(
+                esi_development_visualizer::DEVELOPMENT_LOOP_RESOURCE_URI,
+                "ESI Controller Evidence",
+            )
+            .with_mime_type(esi_development_visualizer::MCP_APPS_MIME_TYPE)],
+            ..Default::default()
+        })
+    }
+
+    async fn read_resource(
+        &self,
+        _session: &str,
+        uri: &str,
+        _cancel: CancellationToken,
+    ) -> Result<rmcp::model::ReadResourceResult, Error> {
+        if uri != esi_development_visualizer::DEVELOPMENT_LOOP_RESOURCE_URI {
+            return Err(Error::TransportClosed);
+        }
+        let mut meta = rmcp::model::MetaObject::new();
+        meta.0.insert("ui".into(), json!({"csp":{"connectDomains":[],"resourceDomains":[],"frameDomains":[],"baseUriDomains":[]}}));
+        Ok(rmcp::model::ReadResourceResult::new(vec![
+            rmcp::model::ResourceContents::TextResourceContents {
+                uri: uri.into(),
+                mime_type: Some(esi_development_visualizer::MCP_APPS_MIME_TYPE.into()),
+                text: esi_development_visualizer::app_html().into(),
+                meta: Some(meta),
+            },
+        ]))
+    }
+}
+
+fn controller_ui_meta() -> rmcp::model::MetaObject {
+    let mut meta = rmcp::model::MetaObject::new();
+    meta.0.insert(
+        "ui".into(),
+        json!({"resourceUri":esi_development_visualizer::DEVELOPMENT_LOOP_RESOURCE_URI}),
+    );
+    meta
 }

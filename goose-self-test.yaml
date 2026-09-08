@@ -54,6 +54,14 @@ parameters:
     description: "Clean up test artifacts after completion"
 
 instructions: |
+  {% if test_phases == "all" or "controller-resume" in test_phases %}
+  ### ESI Controller Resume
+  Run `node scripts/test-isolated.mjs cargo test --locked -p esi-development -p esi-development-visualizer`.
+  Run `node scripts/test-isolated.mjs cargo test --locked -p goose --lib controller_factory`.
+  Run `node scripts/test-isolated.mjs cargo test --locked -p goose --lib authority_acp_app`.
+  Record interrupted operation, preserved task identity and historical-vs-current evidence.
+  {% endif %}
+
   {% if test_phases == "all" or "controller-binding" in test_phases %}
   ### ESI Controller Binding
   Run `node scripts/test-isolated.mjs cargo test --locked -p esi-development --test service`.

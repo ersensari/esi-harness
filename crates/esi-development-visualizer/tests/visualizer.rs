@@ -139,6 +139,9 @@ fn state_with_validator(worktree: &Path, program: &str, policy: RepairPolicy) ->
 fn view_schema_exposes_every_read_only_section() {
     let schema = serde_json::to_string(&schemars::schema_for!(DevelopmentLoopView)).unwrap();
     for field in [
+        "operations",
+        "recovery_message",
+        "evidence_current",
         "status",
         "source",
         "current_stage",
@@ -154,6 +157,41 @@ fn view_schema_exposes_every_read_only_section() {
     ] {
         assert!(schema.contains(field), "schema missing {field}");
     }
+}
+
+#[test]
+fn persisted_interruption_is_visible_without_inventing_pass_or_freshness() {
+    use esi_development::{OperationKind, OperationRequest, OperationStatus};
+    let root = TempDir::new().unwrap();
+    let mut state = state_with_validator(root.path(), "/bin/true", RepairPolicy::default());
+    let path = root.path().join("state.json");
+    state
+        .reserve_operation(
+            &path,
+            OperationRequest {
+                request_id: "v1".into(),
+                kind: OperationKind::Validate,
+                source_plan_hash: "a".repeat(64),
+                source_revision: 1,
+                task_id: "T1".into(),
+                session_id: "chat".into(),
+                policy_digest: "b".repeat(64),
+                expected_snapshot: "snapshot-1".into(),
+            },
+        )
+        .unwrap();
+    let started = DevelopmentLoopView::load(&path).unwrap();
+    assert_eq!(started.operations[0]["status"], "started");
+    assert!(started.recovery_message.unwrap().contains("task lease"));
+    state
+        .finish_operation(&path, "v1", OperationStatus::Interrupted)
+        .unwrap();
+    let view = DevelopmentLoopView::load(&path).unwrap();
+    assert_eq!(view.operations[0]["status"], "interrupted");
+    assert!(view.recovery_message.unwrap().contains("not PASS"));
+    assert!(view.validation_evidence.is_empty());
+    assert_eq!(view.evidence_current, None);
+    assert!(!view.repair_budgets.is_empty());
 }
 
 #[test]

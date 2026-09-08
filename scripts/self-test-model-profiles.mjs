@@ -8,7 +8,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 const studio = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const [binary, reportPath, phase = 'model-profiles'] = process.argv.slice(2);
+const [binary, reportPath, phase = 'model-profiles', loop = '0'] = process.argv.slice(2);
+assert(['0', '1'].includes(loop));
 const phaseTitles = {
   'model-profiles': 'ESI Custom Model Profiles',
   'provider-discovery': 'ESI Provider Model Discovery',
@@ -22,6 +23,7 @@ const phaseTitles = {
   'planning-release': 'ESI Planning Release',
   'controller-tools': 'ESI Controller Tools',
   'controller-binding': 'ESI Controller Binding',
+  'controller-resume': 'ESI Controller Resume',
 };
 assert(Object.hasOwn(phaseTitles, phase));
 const phaseTitle = phaseTitles[phase];
@@ -30,7 +32,11 @@ const root = await mkdtemp(join(tmpdir(), 'forgeloop-ai-profile-selftest-'));
 const artifacts = join(root, 'artifacts');
 await mkdir(artifacts);
 await mkdir(join(root, 'config/custom_providers'), { recursive: true });
-const commands = phase === 'controller-binding' ? [
+const commands = phase === 'controller-resume' ? [
+  'node scripts/test-isolated.mjs cargo test --locked -p esi-development -p esi-development-visualizer -- --quiet',
+  'node scripts/test-isolated.mjs cargo test --locked -p goose --lib controller_factory -- --quiet',
+  'node scripts/test-isolated.mjs cargo test --locked -p goose --lib authority_acp_app -- --quiet',
+] : phase === 'controller-binding' ? [
   'node scripts/test-isolated.mjs cargo test --locked -p esi-development --test service -- --quiet',
   'node scripts/test-isolated.mjs cargo test --locked -p goose --lib controller_factory -- --quiet',
   'node scripts/test-isolated.mjs cargo test --locked -p goose --lib authority_acp_app -- --quiet',
@@ -131,7 +137,7 @@ try {
   child = spawn(binary, ['run', '--recipe', join(studio, 'goose-self-test.yaml'), '--params', `test_phases=${phase}`,
     '--params', 'parallel_tests=false', '--params', `workspace_dir=${artifacts}`, '--params', 'cleanup_after=false', '--max-turns', '8', '--quiet'], {
     cwd: root, env: { ...process.env, GOOSE_PATH_ROOT: root, GOOSE_DISABLE_KEYRING: '1', GOOSE_ADDITIONAL_CONFIG_FILES: '',
-      GOOSE_PROVIDER: 'custom_selftest', GOOSE_MODEL: 'self-test-fixture', GOOSE_MODE: 'auto', GOOSE_STATE_MACHINE: '0' },
+      GOOSE_PROVIDER: 'custom_selftest', GOOSE_MODEL: 'self-test-fixture', GOOSE_MODE: 'auto', GOOSE_STATE_MACHINE: loop },
     detached: true, stdio: ['ignore', 'pipe', 'pipe'],
   });
   for (const stream of [child.stdout, child.stderr]) stream.on('data', chunk => { output = (output + chunk).slice(-16000); });
@@ -147,6 +153,6 @@ try {
 } catch (error) { console.error(String(error)); console.error(output.slice(-3000)); process.exitCode = 1; }
 finally {
   server.closeAllConnections(); await new Promise(resolve => server.close(resolve));
-  await writeFile(reportPath, JSON.stringify({ success, phase, provider: 'scripted local fixture', results, failure: failure ?? null }, null, 2));
+  await writeFile(reportPath, JSON.stringify({ success, phase, loop, provider: 'scripted local fixture', results, failure: failure ?? null }, null, 2));
   await rm(root, { recursive: true, force: true });
 }

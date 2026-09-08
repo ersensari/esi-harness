@@ -5279,6 +5279,7 @@ dependencies = [
  "dtor",
  "env-lock",
  "esi-development",
+ "esi-development-visualizer",
  "esi-workspace",
  "esi-workspace-plan",
  "etcetera",
